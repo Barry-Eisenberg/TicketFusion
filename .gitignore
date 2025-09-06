@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.egg-info/
+build/
+dist/
+pip-wheel-metadata/
+.env
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# VS Code
+.vscode/
+
+# IDEs
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+terraform.tfvars
+terraform.tfvars.json
+
+# Secrets / keys
+*.pem
+*.key
+*.crt
+*.p12

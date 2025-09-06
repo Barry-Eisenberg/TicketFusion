@@ -1,0 +1,22 @@
+{
+  "order_id": {
+    "matched_header": null,
+    "dtype": "Int64"
+  },
+  "customer_name": {
+    "matched_header": null,
+    "dtype": "string"
+  },
+  "amount": {
+    "matched_header": null,
+    "dtype": "float"
+  },
+  "status": {
+    "matched_header": null,
+    "dtype": "string"
+  },
+  "ingested_at": {
+    "matched_header": null,
+    "dtype": "datetime64[ns]"
+  }
+}

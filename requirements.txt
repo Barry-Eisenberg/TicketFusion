@@ -1,0 +1,15 @@
+﻿python-dotenv>=1.0
+gspread==6.1.4
+google-auth==2.34.0
+pandas==2.2.3
+SQLAlchemy==2.0.32
+streamlit==1.37.1
+requests>=2.31
+PyYAML>=6.0
+python-terraform==0.10.1
+GitPython>=3.1
+click>=8.1
+
+
+
+

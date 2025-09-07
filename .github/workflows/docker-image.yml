@@ -12,6 +12,7 @@ jobs:
       contents: read
       packages: write
       id-token: write
+      issues: write
     steps:
       - uses: actions/checkout@v4
 
@@ -36,3 +37,18 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+      - name: Create issue announcing published image
+        if: ${{ success() }}
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const repo = context.repo;
+            const imageLatest = `ghcr.io/${repo.owner}/${repo.repo}:latest`;
+            const runUrl = `https://github.com/${repo.owner}/${repo.repo}/actions/runs/${context.runId}`;
+            await github.issues.create({
+              owner: repo.owner,
+              repo: repo.repo,
+              title: `Docker image published: ${imageLatest}`,
+              body: `The Docker image was built and pushed to **${imageLatest}** by workflow **${context.workflow}**.\n\nRun details: ${runUrl}`
+            });

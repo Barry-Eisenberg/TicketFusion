@@ -76,9 +76,13 @@ jobs:
             } catch (e) {
               body += `\n\nNote: failed to read image metadata: ${e.message}`;
             }
-            await github.issues.create({
-              owner: repo.owner.toLowerCase(),
-              repo: repo.repo.toLowerCase(),
-              title: `Docker image published: ${imageLatest}`,
-              body: body
-            });
+            try {
+              await github.rest.issues.create({
+                owner: context.repo.owner.toLowerCase(),
+                repo: context.repo.repo.toLowerCase(),
+                title: `Docker image published: ${imageLatest}`,
+                body: body
+              });
+            } catch (err) {
+              core.setFailed(`Failed to create issue: ${err.message}`);
+            }

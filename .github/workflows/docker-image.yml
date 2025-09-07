@@ -24,8 +24,11 @@ jobs:
 
       - name: Lowercase repository name
         id: lower
+        shell: bash
         run: |
-          echo "repo=$(echo \"${GITHUB_REPOSITORY}\" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+          # use bash parameter expansion to lowercase without adding quotes
+          repo="${GITHUB_REPOSITORY,,}"
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v2

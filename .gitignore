@@ -48,4 +48,4 @@ terraform.tfvars.json
 *.pem
 *.key
 *.crt
-*.p12
+*.p12data.db

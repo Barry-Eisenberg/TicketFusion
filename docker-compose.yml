@@ -1,0 +1,14 @@
+version: '3.8'
+services:
+  ticketfusion:
+    image: ticketfusion:latest
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data.db:/app/data.db
+      - ./service_account.json:/app/service_account.json:ro
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/service_account.json
+      - GOOGLE_SHEETS_DOC_ID=${GOOGLE_SHEETS_DOC_ID}
+    restart: unless-stopped

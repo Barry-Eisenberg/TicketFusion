@@ -30,6 +30,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v4
         with:
           context: .
@@ -38,17 +39,38 @@ jobs:
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
 
+      - name: Inspect pushed image
+        run: |
+          echo "Inspecting image ghcr.io/${{ github.repository }}:latest"
+          docker buildx imagetools inspect ghcr.io/${{ github.repository }}:latest --raw > image_inspect.json || true
+          echo "--- image_inspect.json ---"
+          cat image_inspect.json || true
+
       - name: Create issue announcing published image
         if: ${{ success() }}
         uses: actions/github-script@v6
         with:
           script: |
+            const fs = require('fs');
             const repo = context.repo;
             const imageLatest = `ghcr.io/${repo.owner}/${repo.repo}:latest`;
             const runUrl = `https://github.com/${repo.owner}/${repo.repo}/actions/runs/${context.runId}`;
+            let body = `The Docker image was built and pushed to **${imageLatest}** by workflow **${context.workflow}**.\n\nRun details: ${runUrl}`;
+            try {
+              const raw = fs.readFileSync('image_inspect.json', 'utf8');
+              const info = JSON.parse(raw);
+              if (info && info.manifests && info.manifests.length>0) {
+                const m = info.manifests[0];
+                const digest = m.digest || (m.digest && m.digest[0]) || 'unknown';
+                const size = m.size || 'unknown';
+                body += `\n\nImage metadata:\n- digest: ${digest}\n- size (bytes): ${size}`;
+              }
+            } catch (e) {
+              body += `\n\nNote: failed to read image metadata: ${e.message}`;
+            }
             await github.issues.create({
               owner: repo.owner,
               repo: repo.repo,
               title: `Docker image published: ${imageLatest}`,
-              body: `The Docker image was built and pushed to **${imageLatest}** by workflow **${context.workflow}**.\n\nRun details: ${runUrl}`
+              body: body
             });

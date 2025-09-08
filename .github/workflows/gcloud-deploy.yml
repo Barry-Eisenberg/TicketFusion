@@ -51,6 +51,59 @@ jobs:
           echo "Building and pushing image: $IMAGE"
           gcloud builds submit --tag="$IMAGE" .
           echo "::set-output name=image::$IMAGE"
+name: Build and deploy to Google Cloud Run
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ secrets.GCP_PROJECT }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Enable required GCP APIs
+        run: |
+          gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com --project=${{ secrets.GCP_PROJECT }}
+
+      - name: Ensure Artifact Registry repo exists
+        run: |
+          set -e
+          REPO=${{ secrets.ARTIFACT_REGISTRY_REPOSITORY }}
+          LOCATION=${{ secrets.ARTIFACT_REGISTRY_LOCATION }}
+          PROJECT=${{ secrets.GCP_PROJECT }}
+          if ! gcloud artifacts repositories describe "$REPO" --location="$LOCATION" --project="$PROJECT" >/dev/null 2>&1; then
+            gcloud artifacts repositories create "$REPO" --repository-format=docker --location="$LOCATION" --description="Docker images for TicketFusion" --project="$PROJECT"
+          else
+            echo "Artifact Registry repo $REPO already exists in $LOCATION"
+          fi
+
+      - name: Build and push image (Cloud Build)
+        run: |
+          set -e
+          LOCATION=${{ secrets.ARTIFACT_REGISTRY_LOCATION }}
+          PROJECT=${{ secrets.GCP_PROJECT }}
+          REPO=${{ secrets.ARTIFACT_REGISTRY_REPOSITORY }}
+          IMAGE="$LOCATION-docker.pkg.dev/$PROJECT/$REPO/ticketfusion:latest"
+          echo "Building and pushing image: $IMAGE"
+          gcloud builds submit --tag="$IMAGE" .
+          echo "::set-output name=image::$IMAGE"
 
       - name: Deploy to Cloud Run
         id: deploy

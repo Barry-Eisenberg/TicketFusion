@@ -1,0 +1,108 @@
+name: Build and deploy to Google Cloud Run
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ secrets.GCP_PROJECT }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Enable required GCP APIs
+        run: |
+          gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com --project=${{ secrets.GCP_PROJECT }}
+
+      - name: Ensure Artifact Registry repo exists
+        run: |
+          set -e
+          REPO=${{ secrets.ARTIFACT_REGISTRY_REPOSITORY }}
+          LOCATION=${{ secrets.ARTIFACT_REGISTRY_LOCATION }}
+          PROJECT=${{ secrets.GCP_PROJECT }}
+          if ! gcloud artifacts repositories describe "$REPO" --location="$LOCATION" --project="$PROJECT" >/dev/null 2>&1; then
+            gcloud artifacts repositories create "$REPO" --repository-format=docker --location="$LOCATION" --description="Docker images for TicketFusion" --project="$PROJECT"
+          else
+            echo "Artifact Registry repo $REPO already exists in $LOCATION"
+          fi
+
+      - name: Build and push image (Cloud Build)
+        run: |
+          set -e
+          LOCATION=${{ secrets.ARTIFACT_REGISTRY_LOCATION }}
+          PROJECT=${{ secrets.GCP_PROJECT }}
+          REPO=${{ secrets.ARTIFACT_REGISTRY_REPOSITORY }}
+          IMAGE="$LOCATION-docker.pkg.dev/$PROJECT/$REPO/ticketfusion:latest"
+          echo "Building and pushing image: $IMAGE"
+          gcloud builds submit --tag="$IMAGE" .
+          echo "::set-output name=image::$IMAGE"
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        run: |
+          set -e
+          LOCATION=${{ secrets.ARTIFACT_REGISTRY_LOCATION }}
+          PROJECT=${{ secrets.GCP_PROJECT }}
+          REPO=${{ secrets.ARTIFACT_REGISTRY_REPOSITORY }}
+          IMAGE="$LOCATION-docker.pkg.dev/$PROJECT/$REPO/ticketfusion:latest"
+          SERVICE=${{ secrets.CLOUD_RUN_SERVICE }}
+          REGION=${{ secrets.CLOUD_RUN_REGION }}
+          ALLOW_UNAUTH=${{ secrets.ALLOW_UNAUTHENTICATED }}
+          # decide allow unauthenticated flag
+          if [ "${ALLOW_UNAUTH}" = "true" ] || [ "${ALLOW_UNAUTH}" = "True" ]; then
+            UNAUTH_FLAG="--allow-unauthenticated"
+          else
+            UNAUTH_FLAG="--no-allow-unauthenticated"
+          fi
+
+          # Prepare env vars for deployment
+          ENV_VARS="GOOGLE_SHEETS_DOC_ID=${{ secrets.GOOGLE_SHEETS_DOC_ID }}"
+
+          # If a Secret Manager secret name is provided, grant Cloud Run access and attach it
+          if [ -n "${{ secrets.GOOGLE_SA_SECRET_NAME }}" ]; then
+            SECRET_NAME=${{ secrets.GOOGLE_SA_SECRET_NAME }}
+            echo "Granting Cloud Run runtime access to Secret Manager secret: $SECRET_NAME"
+            # grant access to the Cloud Run runtime service account
+            RUN_SA=$(gcloud run services describe "$SERVICE" --platform=managed --region="$REGION" --project="$PROJECT" --format='value(spec.template.spec.serviceAccountName)' || true)
+            if [ -z "$RUN_SA" ]; then
+              # default Cloud Run runtime SA name
+              RUN_SA="$PROJECT-compute@developer.gserviceaccount.com"
+            fi
+            gcloud secrets add-iam-policy-binding "$SECRET_NAME" --member="serviceAccount:$RUN_SA" --role="roles/secretmanager.secretAccessor" --project="$PROJECT" || true
+            # Add Secret Manager secret as an env var in Cloud Run
+            # Using the new Secret Manager integration flag
+            ENV_VARS="$ENV_VARS,GOOGLE_SERVICE_ACCOUNT_JSON=projects/$PROJECT/secrets/$SECRET_NAME/versions/latest"
+          fi
+
+          echo "Deploying $IMAGE to Cloud Run service $SERVICE in $REGION with env: $ENV_VARS"
+          gcloud run deploy "$SERVICE" --image="$IMAGE" --platform=managed --region="$REGION" $UNAUTH_FLAG --port=8501 --set-env-vars="$ENV_VARS"
+
+          # If secret was attached, bind it to Cloud Run (Secret Manager integration)
+          if [ -n "${{ secrets.GOOGLE_SA_SECRET_NAME }}" ]; then
+            echo "Binding secret to Cloud Run service via revisions..."
+            # Update the service to mount the secret as env var (this is a no-op if already attached)
+            gcloud run services update "$SERVICE" --region="$REGION" --project="$PROJECT" --update-secrets="GOOGLE_SERVICE_ACCOUNT_JSON=projects/$PROJECT/secrets/${{ secrets.GOOGLE_SA_SECRET_NAME }}/versions/latest" || true
+          fi
+
+          # print URL
+          URL=$(gcloud run services describe "$SERVICE" --platform=managed --region="$REGION" --project="$PROJECT" --format='value(status.url)')
+          echo "Service URL: $URL"
+          echo "SERVICE_URL=$URL" >> $GITHUB_OUTPUT
+
+      - name: Report deployed URL
+        run: echo "Deployed to: ${{ steps.deploy.outputs.SERVICE_URL }}"

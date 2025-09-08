@@ -8,27 +8,34 @@ from datetime import datetime, timezone
 import difflib
 import json
 import inspect
+import hashlib
 
-import pandas as pd
-import gspread
-from google.oauth2.service_account import Credentials
-from dotenv import load_dotenv
-
+# replace the previous single import with a guarded import and fallbacks
 from db import get_engine, init_db, upsert_rows
-from transform import normalize_df, with_row_hash
+try:
+    from db import with_row_hash, normalize_df
+except Exception:
+    with_row_hash = None
+    normalize_df = None
 
+from google.oauth2.service_account import Credentials
+import gspread
+import pandas as pd
+import os
+from dotenv import load_dotenv
+import numpy as np
+
+# add this so BASE_DIR is available for DB_URL and relative paths
 BASE_DIR = Path(__file__).resolve().parent
+
+# load .env from project root so os.getenv(...) works
 load_dotenv(BASE_DIR / ".env")
 
-# Allow overriding the header row index via .env (GOOGLE_SHEETS_HEADER_ROW, 0-based)
-HEADER_ROW_IDX = None
+# Allow overriding the header row index via .env (GOOGLE_SHEETS_HEADER_ROW, 1-based)
 try:
-    v = os.getenv("GOOGLE_SHEETS_HEADER_ROW")
-    if v is not None and str(v).strip() != "":
-        HEADER_ROW_IDX = int(v)
-        logging.info("Using GOOGLE_SHEETS_HEADER_ROW from .env: %d", HEADER_ROW_IDX)
+    HEADER_ROW_IDX = int(os.getenv("GOOGLE_SHEETS_HEADER_ROW", "4")) - 1
 except Exception:
-    HEADER_ROW_IDX = None
+    HEADER_ROW_IDX = 3
 
 DOC_ID = os.getenv("GOOGLE_SHEETS_DOC_ID")
 TAB = os.getenv("GOOGLE_SHEETS_TAB", "Orders")
@@ -49,11 +56,28 @@ if not os.path.exists(CREDS_FILE):
 # Replace the static SCHEMA_MAP with a desired schema and a builder that matches sheet headers.
 # DESIRED_SCHEMA: key = normalized_name, value = (list_of_possible_sheet_headers, pandas_dtype)
 DESIRED_SCHEMA = {
-    "order_id": (["Order ID", "OrderID", "Order #", "Order_Num"], "Int64"),
-    "customer_name": (["Customer Name", "Customer", "Client", "Client Name"], "string"),
-    "amount": (["Amount", "Total", "Sale Amount", "Price"], "float"),
-    "status": (["Status", "State"], "string"),
-    "ingested_at": (["Ingested At", "Ingested", "Timestamp", "Created At"], "datetime64[ns]"),
+    "sold_date": (["Sold Date"], "datetime64[ns]"),
+    "event_date": (["Event Date"], "datetime64[ns]"),
+    "time": (["Time"], "string"),
+    "site": (["Site"], "string"),
+    "order_id": (["Order ID"], "Int64"),
+    "confirm_id": (["Confirm ID"], "string"),
+    "revenue": (["Revenue"], "float"),
+    "cost": (["Cost"], "float"),
+    "cnt": (["CNT"], "Int64"),
+    "cc": (["CC"], "string"),
+    "purch_by": (["Purch By"], "string"),
+    "purch_date": (["Purch Date"], "datetime64[ns]"),
+    "trans_by": (["Trans By"], "string"),
+    "trans_date": (["Trans Date"], "datetime64[ns]"),
+    "email": (["Email"], "string"),
+    "event": (["Event"], "string"),
+    "theater": (["Theater"], "string"),
+    "section": (["Section"], "string"),
+    "row": (["Row"], "string"),
+    "venue": (["Venue"], "string"),
+    "notes": (["Notes"], "string"),
+    "ingested_at": (["Ingested At", "Ingested", "Timestamp"], "datetime64[ns]"),
 }
 
 FUZZY_CUTOFF = 0.6  # 0.0-1.0, increase to require closer matches
@@ -83,11 +107,21 @@ def build_schema_map(actual_headers):
                         break
                 if found:
                     break
-        # fuzzy match fallback (choose best actual header)
+        # fuzzy match fallback (try each alternative separately)
         if not found:
-            candidates = difflib.get_close_matches(" ".join(alternatives), actual, n=1, cutoff=FUZZY_CUTOFF)
-            if candidates:
-                found = candidates[0]
+            for alt in alternatives:
+                candidates = difflib.get_close_matches(alt, actual, n=1, cutoff=FUZZY_CUTOFF)
+                if not candidates:
+                    continue
+                candidate = candidates[0]
+                # special-case: do not match a very short header like "Time"
+                # to a longer alternative like "Ingested At" / "Timestamp"
+                if alt.lower().find("ingest") >= 0 or alt.lower().find("timestamp") >= 0:
+                    if candidate.strip().lower() == "time":
+                        # skip this fuzzy match (likely wrong)
+                        continue
+                found = candidate
+                break
 
         if found:
             mapping[found] = (norm_name, dtype)
@@ -255,6 +289,16 @@ def enforce_schema_and_prepare(df: pd.DataFrame, schema_map: dict) -> pd.DataFra
     for _, (norm_name, dtype) in schema_map.items():
         norm_types[norm_name] = dtype
 
+    # --- ADDED: clean currency/number strings so coercion works (strip $, commas, parentheses) ---
+    import re
+    for dst, dtype in norm_types.items():
+        if dst in df.columns and dtype in ("float", "Int64"):
+            # convert to str, strip common currency characters, then coerce
+            df[dst] = df[dst].astype("string").fillna("").str.replace(r"[^\d\.\-]", "", regex=True)
+            # keep empty strings as NaN for numeric conversion
+            df.loc[df[dst] == "", dst] = pd.NA
+    # --- end added block ---
+
     for dst, dtype in norm_types.items():
         if dst in df.columns:
             try:
@@ -275,9 +319,16 @@ def enforce_schema_and_prepare(df: pd.DataFrame, schema_map: dict) -> pd.DataFra
 
     # Compute row hash using project helper (append column 'row_hash')
     try:
-        df = with_row_hash(df)
+        if with_row_hash:
+            df = with_row_hash(df)
+        else:
+            raise RuntimeError("with_row_hash not available")
     except Exception:
-        df["row_hash"] = df.astype(str).sum(axis=1).apply(lambda s: str(abs(hash(s))))
+        # stable SHA1 of the joined row values
+        def _sha1_of_row(row):
+            s = "|".join("" if v is None else str(v) for v in row)
+            return hashlib.sha1(s.encode("utf-8")).hexdigest()
+        df["row_hash"] = df.apply(lambda r: _sha1_of_row(r.values), axis=1)
 
     return df
 
@@ -347,12 +398,36 @@ def main():
 
     df = enforce_schema_and_prepare(raw, schema_map)
 
+    # (removed legacy mapping for customer_name/amount/status)
+
+    # Continue preparing rows for DB upsert...
     # Prepare rows to upsert: convert timestamps to ISO or native objects depending on DB layer
     # We convert pandas Timestamp to Python datetime to be safe for SQLAlchemy
+    # Convert pandas Timestamp -> python datetime (safest for SQLAlchemy)
     for col in df.select_dtypes(include=["datetime64[ns]"]).columns:
         df[col] = df[col].apply(lambda x: x.to_pydatetime() if pd.notna(x) else None)
 
-    rows = df.to_dict(orient="records")
+    # Ensure missing values become None and numpy/pandas scalars become native Python scalars
+    df = df.where(pd.notna(df), None)
+
+    rows = []
+    for rec in df.to_dict(orient="records"):
+        clean = {}
+        for k, v in rec.items():
+            # treat pandas/np missing as None
+            if pd.isna(v):
+                clean[k] = None
+                continue
+            # pandas/np scalar -> python native
+            if isinstance(v, (np.generic,)):
+                try:
+                    clean[k] = v.item()
+                except Exception:
+                    clean[k] = v
+                continue
+            # leave datetimes and strings intact
+            clean[k] = v
+        rows.append(clean)
 
     # Upsert into DB table 'sheet_facts' using expected signature: upsert_rows(engine, rows)
     try:

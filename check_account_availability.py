@@ -28,6 +28,27 @@ import pandas as pd
 from ingest import fetch_sheet, DOC_ID as ENV_DOC_ID
 from db import get_engine
 
+# Prefer GOOGLE_SERVICE_ACCOUNT_JSON (set by deployment) or GOOGLE_APPLICATION_CREDENTIALS
+# If GOOGLE_SERVICE_ACCOUNT_JSON contains JSON content, write it to /app/service_account.json
+# If GOOGLE_APPLICATION_CREDENTIALS points to secret:// or is empty, we leave it to the container entrypoint or runtime.
+import os
+_gsa_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+if _gsa_json:
+    try:
+        # if the var looks like a Secret Manager resource (projects/...), pass-through to entrypoint behavior
+        if _gsa_json.startswith("projects/") or _gsa_json.startswith("secret://"):
+            # let entrypoint or runtime handle secret retrieval; export as GOOGLE_APPLICATION_CREDENTIALS-like value
+            os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", _gsa_json)
+        else:
+            # assume it's raw JSON content; materialize to file
+            target = Path("/app/service_account.json")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(_gsa_json)
+            os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", str(target))
+    except Exception:
+        # non-fatal; fall back to existing behavior
+        pass
+
 
 def load_accounts_from_sheet(doc_id: Optional[str], tab: str = "Accounts") -> pd.Series:
     key = doc_id or ENV_DOC_ID

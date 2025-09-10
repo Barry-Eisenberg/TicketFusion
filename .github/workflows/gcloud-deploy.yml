@@ -65,7 +65,7 @@ jobs:
           echo "gcloud-deploy minimal: setup action ran"
           echo "GITHUB_RUN_ID=$GITHUB_RUN_ID"
 
-      - name: Build container with Cloud Build
+      - name: Build container with docker and push to GCR
         env:
           GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -76,7 +76,11 @@ jobs:
           short_sha=${GITHUB_SHA:0:8}
           IMAGE=gcr.io/${GCP_PROJECT}/${repo_name}:${short_sha}
           echo "Building and pushing image: $IMAGE"
-          gcloud builds submit --tag "$IMAGE" .
+          # Configure docker to use gcloud credential helper for GCR
+          gcloud auth configure-docker --quiet
+          # Build and push using Docker (avoids Cloud Build bucket permission)
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_OUTPUT"
 
       - name: Deploy to Cloud Run

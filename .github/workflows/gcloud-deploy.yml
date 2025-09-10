@@ -20,6 +20,23 @@ jobs:
       - name: Show gcloud version
         run: gcloud --version
 
+      - name: Authenticate using service account (auth action)
+        uses: google-github-actions/auth@v1
+        if: ${{ secrets.GCP_SA_KEY != '' }}
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          token_format: 'access_token'
+
+      - name: Show active account and project
+        if: ${{ secrets.GCP_SA_KEY != '' }}
+        run: |
+          gcloud auth list
+          gcloud config get-value project || echo "no project set"
+
+      - name: List enabled services (if authenticated)
+        if: ${{ secrets.GCP_SA_KEY != '' }}
+        run: gcloud services list --enabled || true
+
       - name: Smoke echo
         run: |
           echo "gcloud-deploy minimal: setup action ran"

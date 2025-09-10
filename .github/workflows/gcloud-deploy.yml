@@ -64,3 +64,36 @@ jobs:
         run: |
           echo "gcloud-deploy minimal: setup action ran"
           echo "GITHUB_RUN_ID=$GITHUB_RUN_ID"
+
+      - name: Build container with Cloud Build
+        env:
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          repo_name=${GITHUB_REPOSITORY##*/}
+          short_sha=${GITHUB_SHA:0:8}
+          IMAGE=gcr.io/${GCP_PROJECT}/${repo_name}:${short_sha}
+          echo "Building and pushing image: $IMAGE"
+          gcloud builds submit --tag "$IMAGE" .
+          echo "IMAGE=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Cloud Run
+        env:
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+          CLOUD_RUN_SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
+          CLOUD_RUN_REGION: ${{ secrets.CLOUD_RUN_REGION }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          repo_name=${GITHUB_REPOSITORY##*/}
+          short_sha=${GITHUB_SHA:0:8}
+          IMAGE=gcr.io/${GCP_PROJECT}/${repo_name}:${short_sha}
+          service=${CLOUD_RUN_SERVICE:-ticketfusion}
+          region=${CLOUD_RUN_REGION:-us-central1}
+          echo "Deploying $IMAGE to Cloud Run service '$service' in region '$region'"
+          gcloud run deploy "$service" --image "$IMAGE" --region "$region" --platform managed --quiet
+          URL=$(gcloud run services describe "$service" --region "$region" --platform managed --format='value(status.url)') || URL=""
+          echo "service_url=$URL" >> "$GITHUB_OUTPUT"

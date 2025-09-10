@@ -1,4 +1,4 @@
-name: Cloud Run deploy (gcloud setup)
+name: Cloud Run deploy (gcloud setup minimal)
 
 on:
   push:
@@ -6,33 +6,21 @@ on:
 
 jobs:
   gcloud-setup:
-    name: gcloud setup (incremental)
+    name: gcloud setup (minimal)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup gcloud CLI
+      - name: Setup gcloud CLI (no project)
         uses: google-github-actions/setup-gcloud@v1
         with:
-          project_id: ${{ secrets.GCP_PROJECT }}
           version: 'latest'
 
       - name: Show gcloud version
         run: gcloud --version
 
-      - name: Authenticate with service account (if provided)
-        if: ${{ secrets.GCP_SA_KEY != '' }}
-        run: |
-          echo "Authenticating using GCP_SA_KEY secret"
-          printf "%s" "${{ secrets.GCP_SA_KEY }}" > "$RUNNER_TEMP/gcp-key.json"
-          gcloud auth activate-service-account --key-file="$RUNNER_TEMP/gcp-key.json"
-          gcloud config set project "${{ secrets.GCP_PROJECT }}"
-
-      - name: List enabled APIs (no-fail)
-        run: gcloud services list --enabled || true
-
       - name: Smoke echo
         run: |
-          echo "gcloud-deploy incremental: gcloud setup complete"
+          echo "gcloud-deploy minimal: setup action ran"
           echo "GITHUB_RUN_ID=$GITHUB_RUN_ID"

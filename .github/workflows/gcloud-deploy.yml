@@ -65,21 +65,37 @@ jobs:
           echo "gcloud-deploy minimal: setup action ran"
           echo "GITHUB_RUN_ID=$GITHUB_RUN_ID"
 
-      - name: Build container with docker and push to GCR
+      - name: Build container with docker and push to Artifact Registry
         env:
           GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SHA: ${{ github.sha }}
+          CLOUD_RUN_REGION: ${{ secrets.CLOUD_RUN_REGION }}
         run: |
           set -euo pipefail
           repo_name=${GITHUB_REPOSITORY##*/}
           # Docker tags must be lowercase
           repo_name=${repo_name,,}
           short_sha=${GITHUB_SHA:0:8}
-          IMAGE=gcr.io/${GCP_PROJECT}/${repo_name}:${short_sha}
-          echo "Building and pushing image: $IMAGE"
-          # Configure docker to use gcloud credential helper for GCR
-          gcloud auth configure-docker --quiet
+          # Use Artifact Registry host for the region (default to us-central1)
+          region=${CLOUD_RUN_REGION:-us-central1}
+          AR_HOST=${region}-docker.pkg.dev
+          REPO=${repo_name}
+          IMAGE=${AR_HOST}/${GCP_PROJECT}/${REPO}/${repo_name}:${short_sha}
+          echo "Building and pushing image to Artifact Registry: $IMAGE"
+          # Ensure Artifact Registry repository exists (create if missing)
+          if ! gcloud artifacts repositories describe "$REPO" --location="$region" --project="$GCP_PROJECT" >/dev/null 2>&1; then
+            echo "Repository '$REPO' not found in Artifact Registry (region=$region). Creating..."
+            gcloud artifacts repositories create "$REPO" \
+              --repository-format=docker \
+              --location="$region" \
+              --description="auto-created by CI" \
+              --project="$GCP_PROJECT"
+          else
+            echo "Repository '$REPO' already exists in Artifact Registry (region=$region)."
+          fi
+          # Configure docker to use gcloud credential helper for Artifact Registry host only
+          gcloud auth configure-docker "$AR_HOST" --quiet
           # Build and push using Docker (avoids Cloud Build bucket permission)
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
@@ -98,9 +114,11 @@ jobs:
           # Docker tags must be lowercase
           repo_name=${repo_name,,}
           short_sha=${GITHUB_SHA:0:8}
-          IMAGE=gcr.io/${GCP_PROJECT}/${repo_name}:${short_sha}
-          service=${CLOUD_RUN_SERVICE:-ticketfusion}
           region=${CLOUD_RUN_REGION:-us-central1}
+          AR_HOST=${region}-docker.pkg.dev
+          REPO=${repo_name}
+          IMAGE=${AR_HOST}/${GCP_PROJECT}/${REPO}/${repo_name}:${short_sha}
+          service=${CLOUD_RUN_SERVICE:-ticketfusion}
           echo "Deploying $IMAGE to Cloud Run service '$service' in region '$region'"
           gcloud run deploy "$service" --image "$IMAGE" --region "$region" --platform managed --quiet
           URL=$(gcloud run services describe "$service" --region "$region" --platform managed --format='value(status.url)') || URL=""

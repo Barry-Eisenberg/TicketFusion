@@ -73,6 +73,8 @@ jobs:
         run: |
           set -euo pipefail
           repo_name=${GITHUB_REPOSITORY##*/}
+          # Docker tags must be lowercase
+          repo_name=${repo_name,,}
           short_sha=${GITHUB_SHA:0:8}
           IMAGE=gcr.io/${GCP_PROJECT}/${repo_name}:${short_sha}
           echo "Building and pushing image: $IMAGE"
@@ -93,6 +95,8 @@ jobs:
         run: |
           set -euo pipefail
           repo_name=${GITHUB_REPOSITORY##*/}
+          # Docker tags must be lowercase
+          repo_name=${repo_name,,}
           short_sha=${GITHUB_SHA:0:8}
           IMAGE=gcr.io/${GCP_PROJECT}/${repo_name}:${short_sha}
           service=${CLOUD_RUN_SERVICE:-ticketfusion}

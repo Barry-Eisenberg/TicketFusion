@@ -20,22 +20,24 @@ jobs:
       - name: Show gcloud version
         run: gcloud --version
 
-      - name: Authenticate using service account (auth action)
-        uses: google-github-actions/auth@v1
-        if: ${{ secrets.GCP_SA_KEY != '' }}
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-          token_format: 'access_token'
-
-      - name: Show active account and project
-        if: ${{ secrets.GCP_SA_KEY != '' }}
+      - name: Authenticate using GCP_SA_KEY (shell)
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
         run: |
-          gcloud auth list
-          gcloud config get-value project || echo "no project set"
-
-      - name: List enabled services (if authenticated)
-        if: ${{ secrets.GCP_SA_KEY != '' }}
-        run: gcloud services list --enabled || true
+          if [ -n "$GCP_SA_KEY" ]; then
+            echo "Found GCP_SA_KEY secret, writing to temp file and activating service account"
+            printf '%s' "$GCP_SA_KEY" > "$RUNNER_TEMP/gcp-key.json"
+            gcloud auth activate-service-account --key-file="$RUNNER_TEMP/gcp-key.json"
+            if [ -n "$GCP_PROJECT" ]; then
+              gcloud config set project "$GCP_PROJECT"
+            fi
+            echo "Active accounts:"; gcloud auth list || true
+            echo "Configured project:"; gcloud config get-value project || true
+            echo "Enabled services:"; gcloud services list --enabled || true
+          else
+            echo "GCP_SA_KEY not provided; skipping gcloud auth"
+          fi
 
       - name: Smoke echo
         run: |

@@ -120,6 +120,9 @@ jobs:
           IMAGE=${AR_HOST}/${GCP_PROJECT}/${REPO}/${repo_name}:${short_sha}
           service=${CLOUD_RUN_SERVICE:-ticketfusion}
           echo "Deploying $IMAGE to Cloud Run service '$service' in region '$region'"
-          gcloud run deploy "$service" --image "$IMAGE" --region "$region" --platform managed --quiet
+          # Use the active authenticated service account as the Cloud Run runtime service account
+          ACTIVE_SA=$(gcloud config get-value account)
+          echo "Using service account for runtime: $ACTIVE_SA"
+          gcloud run deploy "$service" --image "$IMAGE" --region "$region" --platform managed --service-account "$ACTIVE_SA" --quiet
           URL=$(gcloud run services describe "$service" --region "$region" --platform managed --format='value(status.url)') || URL=""
           echo "service_url=$URL" >> "$GITHUB_OUTPUT"

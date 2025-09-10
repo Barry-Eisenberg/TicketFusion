@@ -39,6 +39,27 @@ jobs:
             echo "GCP_SA_KEY not provided; skipping gcloud auth"
           fi
 
+      - name: Enable required GCP APIs (best-effort)
+        env:
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+        run: |
+          if [ -z "$GCP_PROJECT" ]; then
+            echo "GCP_PROJECT not set; skipping API enable"
+            exit 0
+          fi
+          apis=(
+            "cloudresourcemanager.googleapis.com"
+            "serviceusage.googleapis.com"
+            "artifactregistry.googleapis.com"
+            "cloudbuild.googleapis.com"
+            "run.googleapis.com"
+            "iam.googleapis.com"
+          )
+          for api in "${apis[@]}"; do
+            echo "Enabling $api for project $GCP_PROJECT (best-effort)"
+            gcloud services enable "$api" --project "$GCP_PROJECT" || echo "warning: failed to enable $api"
+          done
+
       - name: Smoke echo
         run: |
           echo "gcloud-deploy minimal: setup action ran"

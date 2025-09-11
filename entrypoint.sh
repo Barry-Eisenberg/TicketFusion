@@ -49,5 +49,18 @@ except Exception as e:
 PY
 fi
 
-# Run the requested command
-exec "$@"
+# Run the requested command.
+# If the Dockerfile uses a shell-form CMD (a single string) we need to run
+# it through a shell so expansions like ${PORT:-8080} are evaluated and the
+# command is parsed into argv correctly. Using `bash -lc` preserves the
+# original behavior when CMD is provided as an array as well.
+if [ "$#" -eq 0 ]; then
+  echo "No command provided to entrypoint; exiting." >&2
+  exit 0
+fi
+
+# Join all args into a single command string and run via bash -lc so
+# environment variable expansions (e.g. ${PORT:-8080}) work when CMD is
+# supplied in shell form by the Dockerfile.
+CMD_STR="$*"
+exec bash -lc "$CMD_STR"

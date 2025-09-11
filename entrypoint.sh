@@ -29,5 +29,25 @@ if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ] && [[ "$GOOGLE_APPLICATION_CREDE
   fi
 fi
 
+# Ensure a PORT is set for Cloud Run compatibility (default 8080)
+export PORT="${PORT:-8080}"
+
+# Helpful Streamlit env defaults
+export STREAMLIT_SERVER_HEADLESS="${STREAMLIT_SERVER_HEADLESS:-true}"
+
+# Ensure the local SQLite schema exists (non-fatal)
+if command -v python >/dev/null 2>&1; then
+  echo "Ensuring local SQLite schema exists (data.db -> /app/data.db)"
+  # run a tiny one-off python snippet to create tables if missing
+  python - <<'PY' || true
+from db import get_engine, init_db
+try:
+    init_db(get_engine())
+    print('DB init: OK')
+except Exception as e:
+    print('DB init: skipped/failure:', e)
+PY
+fi
+
 # Run the requested command
 exec "$@"

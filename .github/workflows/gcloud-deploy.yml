@@ -126,3 +126,40 @@ jobs:
           gcloud run deploy "$service" --image "$IMAGE" --region "$region" --platform managed --service-account "$ACTIVE_SA" --quiet
           URL=$(gcloud run services describe "$service" --region "$region" --platform managed --format='value(status.url)') || URL=""
           echo "service_url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: "Post-deploy smoke test: wait for HTTP 200"
+        env:
+          CLOUD_RUN_REGION: ${{ secrets.CLOUD_RUN_REGION }}
+          CLOUD_RUN_SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+        run: |
+          set -euo pipefail
+          region=${CLOUD_RUN_REGION:-us-central1}
+          service=${CLOUD_RUN_SERVICE:-ticketfusion}
+          # Get the service URL
+          URL=$(gcloud run services describe "$service" --project="$GCP_PROJECT" --region="$region" --format='value(status.url)')
+          echo "Testing service URL: $URL"
+          if [ -z "$URL" ]; then
+            echo "No service URL found; failing"
+            exit 1
+          fi
+          # Poll for up to ~2 minutes (24 attempts x 5s)
+          attempts=24
+          sleep_secs=5
+          for i in $(seq 1 $attempts); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" "$URL" || echo "000")
+            echo "Attempt $i: HTTP $status"
+            if [ "$status" = "200" ]; then
+              echo "Service responded with 200"
+              exit 0
+            fi
+            sleep $sleep_secs
+          done
+          echo "Service did not return HTTP 200 after $((attempts*sleep_secs))s"
+          echo "Collecting debug output from the service..."
+          # Capture headers and small body for debugging
+          echo "--- curl -i output ---"
+          curl -i --max-time 10 "$URL" || true
+          echo "--- curl verbose output (stderr) ---"
+          curl -v --max-time 10 "$URL" 2>&1 | sed -n '1,200p' || true
+          exit 1

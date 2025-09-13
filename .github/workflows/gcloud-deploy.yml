@@ -157,9 +157,30 @@ jobs:
           done
           echo "Service did not return HTTP 200 after $((attempts*sleep_secs))s"
           echo "Collecting debug output from the service..."
-          # Capture headers and small body for debugging
-          echo "--- curl -i output ---"
-          curl -i --max-time 10 "$URL" || true
-          echo "--- curl verbose output (stderr) ---"
-          curl -v --max-time 10 "$URL" 2>&1 | sed -n '1,200p' || true
+          # Save useful debug outputs to files so we can upload them as artifacts
+          DEBUG_PREFIX="$GITHUB_WORKSPACE/smoke-test-debug"
+          mkdir -p "$GITHUB_WORKSPACE"
+          echo "URL=$URL" > "$DEBUG_PREFIX"_env.txt
+          echo "ATTEMPTS=$attempts" >> "$DEBUG_PREFIX"_env.txt
+          date >> "$DEBUG_PREFIX"_env.txt || true
+          echo "--- curl -i (headers+body) ---" > "$DEBUG_PREFIX"_curl_i.txt
+          curl -i --max-time 10 "$URL" >> "$DEBUG_PREFIX"_curl_i.txt 2>&1 || true
+          echo "--- curl -v (verbose stderr) ---" > "$DEBUG_PREFIX"_curl_verbose.txt
+          curl -v --max-time 10 "$URL" 2> "$DEBUG_PREFIX"_curl_verbose.txt || true
+          # Also capture a short HTTP-only body fetch
+          curl -sS --max-time 10 "$URL" -o "$DEBUG_PREFIX"_body.txt || true
+          echo "Saved debug files: ${DEBUG_PREFIX}_*.txt"
+          # Print short headers to the log for convenience
+          sed -n '1,120p' "$DEBUG_PREFIX"_curl_i.txt || true
           exit 1
+
+      - name: "Upload smoke-test debug artifact on failure"
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-debug
+          path: |
+            smoke-test-debug_env.txt
+            smoke-test-debug_curl_i.txt
+            smoke-test-debug_curl_verbose.txt
+            smoke-test-debug_body.txt

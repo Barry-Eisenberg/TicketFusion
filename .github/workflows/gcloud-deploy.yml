@@ -127,6 +127,33 @@ jobs:
           URL=$(gcloud run services describe "$service" --region "$region" --platform managed --format='value(status.url)') || URL=""
           echo "service_url=$URL" >> "$GITHUB_OUTPUT"
 
+      - name: "Collect deploy debug on failure"
+        if: ${{ failure() }}
+        env:
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+          CLOUD_RUN_REGION: ${{ secrets.CLOUD_RUN_REGION }}
+          CLOUD_RUN_SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
+        run: |
+          set -euo pipefail
+          region=${CLOUD_RUN_REGION:-us-central1}
+          service=${CLOUD_RUN_SERVICE:-ticketfusion}
+          outdir="$GITHUB_WORKSPACE/deploy-debug"
+          mkdir -p "$outdir"
+          echo "Collecting Cloud Run service describe..."
+          gcloud run services describe "$service" --project="$GCP_PROJECT" --region="$region" --format=json > "$outdir/service.json" || echo "describe failed" > "$outdir/service-describe-error.txt"
+          echo "Listing revisions..."
+          gcloud run revisions list --service "$service" --project="$GCP_PROJECT" --region="$region" --format=json > "$outdir/revisions.json" || true
+          # Try to find the latest revision name
+          REVISION=$(jq -r '.[0].metadata.name // empty' "$outdir/revisions.json" 2>/dev/null || true)
+          if [ -n "$REVISION" ]; then
+            echo "Describing revision $REVISION"
+            gcloud run revisions describe "$REVISION" --service "$service" --project="$GCP_PROJECT" --region="$region" --format=json > "$outdir/revision-describe.json" || true
+          fi
+          echo "Attempting to read recent Cloud Run revision logs (best-effort)"
+          # This may require logging permissions; do best-effort and limit results
+          gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=\"$service\"" --project="$GCP_PROJECT" --limit=200 --format=json > "$outdir/revision-logs.json" || echo "logging-read-failed" > "$outdir/logging-error.txt"
+          echo "Saved deploy debug files to $outdir"
+
       - name: "Post-deploy smoke test: wait for HTTP 200"
         env:
           CLOUD_RUN_REGION: ${{ secrets.CLOUD_RUN_REGION }}
@@ -184,3 +211,4 @@ jobs:
             smoke-test-debug_curl_i.txt
             smoke-test-debug_curl_verbose.txt
             smoke-test-debug_body.txt
+            deploy-debug/**

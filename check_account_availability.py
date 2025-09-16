@@ -28,6 +28,27 @@ import pandas as pd
 from ingest import fetch_sheet, DOC_ID as ENV_DOC_ID
 from db import get_engine
 
+# Prefer GOOGLE_SERVICE_ACCOUNT_JSON (set by deployment) or GOOGLE_APPLICATION_CREDENTIALS
+# If GOOGLE_SERVICE_ACCOUNT_JSON contains JSON content, write it to /app/service_account.json
+# If GOOGLE_APPLICATION_CREDENTIALS points to secret:// or is empty, we leave it to the container entrypoint or runtime.
+import os
+_gsa_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+if _gsa_json:
+    try:
+        # if the var looks like a Secret Manager resource (projects/...), pass-through to entrypoint behavior
+        if _gsa_json.startswith("projects/") or _gsa_json.startswith("secret://"):
+            # let entrypoint or runtime handle secret retrieval; export as GOOGLE_APPLICATION_CREDENTIALS-like value
+            os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", _gsa_json)
+        else:
+            # assume it's raw JSON content; materialize to file
+            target = Path("/app/service_account.json")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(_gsa_json)
+            os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", str(target))
+    except Exception:
+        # non-fatal; fall back to existing behavior
+        pass
+
 
 def load_accounts_from_sheet(doc_id: Optional[str], tab: str = "Accounts") -> pd.Series:
     key = doc_id or ENV_DOC_ID
@@ -96,6 +117,23 @@ def check_email_availability(
     applicable.
     """
     reasons: List[str] = []
+    # Normalize incoming orders DataFrame: tests may pass an empty DataFrame with no columns
+    if not isinstance(orders, pd.DataFrame):
+        orders = pd.DataFrame(orders)
+    orders = orders.copy()
+    required_cols = ["email", "cnt", "event", "theater", "event_date", "sold_date", "ingested_at"]
+    for c in required_cols:
+        if c not in orders.columns:
+            orders[c] = pd.Series(dtype="object")
+
+    # Normalize common types used by the checks
+    for dcol in ("event_date", "sold_date", "ingested_at"):
+        orders[dcol] = pd.to_datetime(orders[dcol], errors="coerce")
+    if "cnt" in orders.columns:
+        orders["cnt"] = pd.to_numeric(orders["cnt"], errors="coerce").fillna(1).astype("Int64")
+    else:
+        orders["cnt"] = 1
+    orders["email"] = orders["email"].astype("string").str.strip().str.lower()
     o = orders[orders["email"] == email].copy()
 
     # Rule 1: active tickets (event_date >= today) sum(cnt) + prospective cnt_new <= 8

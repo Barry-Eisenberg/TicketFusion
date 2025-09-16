@@ -1,18 +1,86 @@
 {
-  "order_id": {
-    "matched_header": null,
-    "dtype": "Int64"
+  "sold_date": {
+    "matched_header": "Sold Date",
+    "dtype": "datetime64[ns]"
   },
-  "customer_name": {
-    "matched_header": null,
+  "event_date": {
+    "matched_header": "Event Date",
+    "dtype": "datetime64[ns]"
+  },
+  "time": {
+    "matched_header": "Time",
     "dtype": "string"
   },
-  "amount": {
-    "matched_header": null,
+  "site": {
+    "matched_header": "Site",
+    "dtype": "string"
+  },
+  "order_id": {
+    "matched_header": "Order ID",
+    "dtype": "Int64"
+  },
+  "confirm_id": {
+    "matched_header": "Confirm ID",
+    "dtype": "string"
+  },
+  "revenue": {
+    "matched_header": "Revenue",
     "dtype": "float"
   },
-  "status": {
-    "matched_header": null,
+  "cost": {
+    "matched_header": "Cost",
+    "dtype": "float"
+  },
+  "cnt": {
+    "matched_header": "CNT",
+    "dtype": "Int64"
+  },
+  "cc": {
+    "matched_header": "CC",
+    "dtype": "string"
+  },
+  "purch_by": {
+    "matched_header": "Purch By",
+    "dtype": "string"
+  },
+  "purch_date": {
+    "matched_header": "Purch Date",
+    "dtype": "datetime64[ns]"
+  },
+  "trans_by": {
+    "matched_header": "Trans By",
+    "dtype": "string"
+  },
+  "trans_date": {
+    "matched_header": "Trans Date",
+    "dtype": "datetime64[ns]"
+  },
+  "email": {
+    "matched_header": "Email",
+    "dtype": "string"
+  },
+  "event": {
+    "matched_header": "Event",
+    "dtype": "string"
+  },
+  "theater": {
+    "matched_header": "Theater",
+    "dtype": "string"
+  },
+  "section": {
+    "matched_header": "Section",
+    "dtype": "string"
+  },
+  "row": {
+    "matched_header": "Row",
+    "dtype": "string"
+  },
+  "venue": {
+    "matched_header": "Venue",
+    "dtype": "string"
+  },
+  "notes": {
+    "matched_header": "Notes",
     "dtype": "string"
   },
   "ingested_at": {

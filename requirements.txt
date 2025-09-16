@@ -9,10 +9,7 @@ PyYAML>=6.0
 python-terraform==0.10.1
 GitPython>=3.1
 click>=8.1
-
-
-
-
+ 
 
 pytest>=7.0
 

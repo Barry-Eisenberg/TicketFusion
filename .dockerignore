@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+data.db
+data.db.bak
+service_account.json
+.env
+.git
+.env.*
+.vscode/
+*.log

@@ -1,0 +1,214 @@
+name: Cloud Run deploy (gcloud setup minimal)
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  gcloud-setup:
+    name: gcloud setup (minimal)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup gcloud CLI (no project)
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          version: 'latest'
+
+      - name: Show gcloud version
+        run: gcloud --version
+
+      - name: Authenticate using GCP_SA_KEY (shell)
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+        run: |
+          if [ -n "$GCP_SA_KEY" ]; then
+            echo "Found GCP_SA_KEY secret, writing to temp file and activating service account"
+            printf '%s' "$GCP_SA_KEY" > "$RUNNER_TEMP/gcp-key.json"
+            gcloud auth activate-service-account --key-file="$RUNNER_TEMP/gcp-key.json"
+            if [ -n "$GCP_PROJECT" ]; then
+              gcloud config set project "$GCP_PROJECT"
+            fi
+            echo "Active accounts:"; gcloud auth list || true
+            echo "Configured project:"; gcloud config get-value project || true
+            echo "Enabled services:"; gcloud services list --enabled || true
+          else
+            echo "GCP_SA_KEY not provided; skipping gcloud auth"
+          fi
+
+      - name: Enable required GCP APIs (best-effort)
+        env:
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+        run: |
+          if [ -z "$GCP_PROJECT" ]; then
+            echo "GCP_PROJECT not set; skipping API enable"
+            exit 0
+          fi
+          apis=(
+            "cloudresourcemanager.googleapis.com"
+            "serviceusage.googleapis.com"
+            "artifactregistry.googleapis.com"
+            "cloudbuild.googleapis.com"
+            "run.googleapis.com"
+            "iam.googleapis.com"
+          )
+          for api in "${apis[@]}"; do
+            echo "Enabling $api for project $GCP_PROJECT (best-effort)"
+            gcloud services enable "$api" --project "$GCP_PROJECT" || echo "warning: failed to enable $api"
+          done
+
+      - name: Smoke echo
+        run: |
+          echo "gcloud-deploy minimal: setup action ran"
+          echo "GITHUB_RUN_ID=$GITHUB_RUN_ID"
+
+      - name: Build container with docker and push to Artifact Registry
+        env:
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+          CLOUD_RUN_REGION: ${{ secrets.CLOUD_RUN_REGION }}
+        run: |
+          set -euo pipefail
+          repo_name=${GITHUB_REPOSITORY##*/}
+          # Docker tags must be lowercase
+          repo_name=${repo_name,,}
+          short_sha=${GITHUB_SHA:0:8}
+          # Use Artifact Registry host for the region (default to us-central1)
+          region=${CLOUD_RUN_REGION:-us-central1}
+          AR_HOST=${region}-docker.pkg.dev
+          REPO=${repo_name}
+          IMAGE=${AR_HOST}/${GCP_PROJECT}/${REPO}/${repo_name}:${short_sha}
+          echo "Building and pushing image to Artifact Registry: $IMAGE"
+          # Ensure Artifact Registry repository exists (create if missing)
+          if ! gcloud artifacts repositories describe "$REPO" --location="$region" --project="$GCP_PROJECT" >/dev/null 2>&1; then
+            echo "Repository '$REPO' not found in Artifact Registry (region=$region). Creating..."
+            gcloud artifacts repositories create "$REPO" \
+              --repository-format=docker \
+              --location="$region" \
+              --description="auto-created by CI" \
+              --project="$GCP_PROJECT"
+          else
+            echo "Repository '$REPO' already exists in Artifact Registry (region=$region)."
+          fi
+          # Configure docker to use gcloud credential helper for Artifact Registry host only
+          gcloud auth configure-docker "$AR_HOST" --quiet
+          # Build and push using Docker (avoids Cloud Build bucket permission)
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Cloud Run
+        env:
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+          CLOUD_RUN_SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
+          CLOUD_RUN_REGION: ${{ secrets.CLOUD_RUN_REGION }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          repo_name=${GITHUB_REPOSITORY##*/}
+          # Docker tags must be lowercase
+          repo_name=${repo_name,,}
+          short_sha=${GITHUB_SHA:0:8}
+          region=${CLOUD_RUN_REGION:-us-central1}
+          AR_HOST=${region}-docker.pkg.dev
+          REPO=${repo_name}
+          IMAGE=${AR_HOST}/${GCP_PROJECT}/${REPO}/${repo_name}:${short_sha}
+          service=${CLOUD_RUN_SERVICE:-ticketfusion}
+          echo "Deploying $IMAGE to Cloud Run service '$service' in region '$region'"
+          # Use the active authenticated service account as the Cloud Run runtime service account
+          ACTIVE_SA=$(gcloud config get-value account)
+          echo "Using service account for runtime: $ACTIVE_SA"
+          gcloud run deploy "$service" --image "$IMAGE" --region "$region" --platform managed --service-account "$ACTIVE_SA" --quiet
+          URL=$(gcloud run services describe "$service" --region "$region" --platform managed --format='value(status.url)') || URL=""
+          echo "service_url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: "Collect deploy debug on failure"
+        if: ${{ failure() }}
+        env:
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+          CLOUD_RUN_REGION: ${{ secrets.CLOUD_RUN_REGION }}
+          CLOUD_RUN_SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
+        run: |
+          set -euo pipefail
+          region=${CLOUD_RUN_REGION:-us-central1}
+          service=${CLOUD_RUN_SERVICE:-ticketfusion}
+          outdir="$GITHUB_WORKSPACE/deploy-debug"
+          mkdir -p "$outdir"
+          echo "Collecting Cloud Run service describe..."
+          gcloud run services describe "$service" --project="$GCP_PROJECT" --region="$region" --format=json > "$outdir/service.json" || echo "describe failed" > "$outdir/service-describe-error.txt"
+          echo "Listing revisions..."
+          gcloud run revisions list --service "$service" --project="$GCP_PROJECT" --region="$region" --format=json > "$outdir/revisions.json" || true
+          # Try to find the latest revision name
+          REVISION=$(jq -r '.[0].metadata.name // empty' "$outdir/revisions.json" 2>/dev/null || true)
+          if [ -n "$REVISION" ]; then
+            echo "Describing revision $REVISION"
+            gcloud run revisions describe "$REVISION" --service "$service" --project="$GCP_PROJECT" --region="$region" --format=json > "$outdir/revision-describe.json" || true
+          fi
+          echo "Attempting to read recent Cloud Run revision logs (best-effort)"
+          # This may require logging permissions; do best-effort and limit results
+          gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=\"$service\"" --project="$GCP_PROJECT" --limit=200 --format=json > "$outdir/revision-logs.json" || echo "logging-read-failed" > "$outdir/logging-error.txt"
+          echo "Saved deploy debug files to $outdir"
+
+      - name: "Post-deploy smoke test: wait for HTTP 200"
+        env:
+          CLOUD_RUN_REGION: ${{ secrets.CLOUD_RUN_REGION }}
+          CLOUD_RUN_SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+        run: |
+          set -euo pipefail
+          region=${CLOUD_RUN_REGION:-us-central1}
+          service=${CLOUD_RUN_SERVICE:-ticketfusion}
+          # Get the service URL
+          URL=$(gcloud run services describe "$service" --project="$GCP_PROJECT" --region="$region" --format='value(status.url)')
+          echo "Testing service URL: $URL"
+          if [ -z "$URL" ]; then
+            echo "No service URL found; failing"
+            exit 1
+          fi
+          # Poll for up to ~2 minutes (24 attempts x 5s)
+          attempts=24
+          sleep_secs=5
+          for i in $(seq 1 $attempts); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" "$URL" || echo "000")
+            echo "Attempt $i: HTTP $status"
+            if [ "$status" = "200" ]; then
+              echo "Service responded with 200"
+              exit 0
+            fi
+            sleep $sleep_secs
+          done
+          echo "Service did not return HTTP 200 after $((attempts*sleep_secs))s"
+          echo "Collecting debug output from the service..."
+          # Save useful debug outputs to files so we can upload them as artifacts
+          DEBUG_PREFIX="$GITHUB_WORKSPACE/smoke-test-debug"
+          mkdir -p "$GITHUB_WORKSPACE"
+          echo "URL=$URL" > "$DEBUG_PREFIX"_env.txt
+          echo "ATTEMPTS=$attempts" >> "$DEBUG_PREFIX"_env.txt
+          date >> "$DEBUG_PREFIX"_env.txt || true
+          echo "--- curl -i (headers+body) ---" > "$DEBUG_PREFIX"_curl_i.txt
+          curl -i --max-time 10 "$URL" >> "$DEBUG_PREFIX"_curl_i.txt 2>&1 || true
+          echo "--- curl -v (verbose stderr) ---" > "$DEBUG_PREFIX"_curl_verbose.txt
+          curl -v --max-time 10 "$URL" 2> "$DEBUG_PREFIX"_curl_verbose.txt || true
+          # Also capture a short HTTP-only body fetch
+          curl -sS --max-time 10 "$URL" -o "$DEBUG_PREFIX"_body.txt || true
+          echo "Saved debug files: ${DEBUG_PREFIX}_*.txt"
+          # Print short headers to the log for convenience
+          sed -n '1,120p' "$DEBUG_PREFIX"_curl_i.txt || true
+          exit 1
+
+      - name: "Upload smoke-test debug artifact on failure"
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-debug
+          path: |
+            smoke-test-debug_env.txt
+            smoke-test-debug_curl_i.txt
+            smoke-test-debug_curl_verbose.txt
+            smoke-test-debug_body.txt
+            deploy-debug/**

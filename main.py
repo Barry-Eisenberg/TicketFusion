@@ -85,9 +85,17 @@ elif app_choice == "Google Sheets Analytics":
     try:
         from analytics_module import run_analytics_app
         run_analytics_app()
+    except ImportError as e:
+        st.error(f"Import error: {str(e)}")
+        st.markdown("Some required modules may not be available. Please check the deployment logs.")
     except Exception as e:
         st.error(f"Error loading Analytics app: {str(e)}")
         st.markdown("Make sure your database is properly configured and contains the 'sheet_facts' table.")
+        
+        # Show more detailed error information for debugging
+        import traceback
+        with st.expander("Debug Information"):
+            st.code(traceback.format_exc())
 
 elif app_choice == "Account Availability Checker":
     # Import and run the availability checker app
@@ -95,6 +103,14 @@ elif app_choice == "Account Availability Checker":
     try:
         from availability_module import run_availability_app
         run_availability_app()
+    except ImportError as e:
+        st.error(f"Import error: {str(e)}")
+        st.markdown("Some required modules may not be available. Please check the deployment logs.")
     except Exception as e:
         st.error(f"Error loading Availability Checker: {str(e)}")
         st.markdown("Make sure your database is properly configured and your Google Sheets credentials are set up.")
+        
+        # Show more detailed error information for debugging
+        import traceback
+        with st.expander("Debug Information"):
+            st.code(traceback.format_exc())

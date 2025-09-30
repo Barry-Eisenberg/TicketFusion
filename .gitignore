@@ -48,5 +48,12 @@ terraform.tfvars.json
 *.pem
 *.key
 *.crt
-*.p12data.db
+*.p12
+service_account.json
 key.json
+data.db
+
+# Log files that might contain sensitive paths
+*.log
+cli_output*.txt
+ingest_run.log

@@ -1,7 +1,8 @@
 ﻿import os, sys, pathlib, traceback
 from dotenv import load_dotenv
 
-PROJECT_DIR = pathlib.Path(r"C:\Users\bmeis\Dropbox\Barry\Filing Cabinet\BizVentures\Ventures\TicketFusion\Product\TF_WorkflowAutomationTool")
+# Use current directory instead of hardcoded path
+PROJECT_DIR = pathlib.Path(__file__).resolve().parent
 print("Python:", sys.version)
 print("Interpreter:", sys.executable)
 print("Project exists:", PROJECT_DIR.exists())

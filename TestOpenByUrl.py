@@ -1,6 +1,10 @@
 from google.oauth2.service_account import Credentials
 import gspread
-CREDS_FILE = r"c:\Users\bmeis\Dropbox\Barry\Filing Cabinet\BizVentures\Ventures\TicketFusion\Product\TF_WorkflowAutomationTool\service_account.json"
+import os
+from pathlib import Path
+
+# Use environment variable or default path
+CREDS_FILE = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "service_account.json")
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
 gc = gspread.authorize(creds)

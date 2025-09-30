@@ -3,7 +3,8 @@ import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text, inspect
 
-BASE = Path(r"C:\Users\bmeis\Dropbox\Barry\Filing Cabinet\BizVentures\Ventures\TicketFusion\Product\TF_WorkflowAutomationTool")
+# Use current directory instead of hardcoded path
+BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / ".env")
 
 db = os.getenv("DB_URL")

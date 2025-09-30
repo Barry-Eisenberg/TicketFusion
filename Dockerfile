@@ -7,19 +7,15 @@ COPY requirements.txt ./
 RUN python -m pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy app
+# Copy app files
 COPY . /app
 
+# Set environment variables
 ENV STREAMLIT_SERVER_HEADLESS=true
 ENV PYTHONUNBUFFERED=1
 
-# Use the port Cloud Run provides (default 8080)
+# Expose port
 EXPOSE 8080
 
-# Copy entrypoint that can materialize service account JSON from an env var
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
-
-ENTRYPOINT ["/app/entrypoint.sh"]
-# Use shell form so the PORT env var is expanded at container runtime. Falls back to 8080.
-CMD streamlit run availability_app.py --server.port ${PORT:-8080} --server.address 0.0.0.0
+# Simple direct command
+CMD ["python", "-m", "streamlit", "run", "main.py", "--server.port", "8080", "--server.address", "0.0.0.0"]

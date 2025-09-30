@@ -4,7 +4,7 @@ services:
     image: ticketfusion:latest
     build: .
     ports:
-      - "8501:8501"
+      - "8080:8080"
     volumes:
       - ./data.db:/app/data.db
       - ./service_account.json:/app/service_account.json:ro

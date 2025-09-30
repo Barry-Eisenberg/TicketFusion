@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 # If GOOGLE_SERVICE_ACCOUNT_JSON env var exists, write it to /app/service_account.json and set GOOGLE_APPLICATION_CREDENTIALS

@@ -54,9 +54,10 @@ if app_choice == "Home":
     # Check database connection
     try:
         from db import get_engine
+        from sqlalchemy import text
         engine = get_engine()
         with engine.connect() as conn:
-            result = conn.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table';"))
             tables = [row[0] for row in result.fetchall()]
         
         if tables:

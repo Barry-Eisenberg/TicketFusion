@@ -1,2 +1,0 @@
-# This file lists system packages that Streamlit Cloud should install
-# Currently no system packages are required for this app

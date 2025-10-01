@@ -40,7 +40,20 @@ def run_availability_app():
             existing_theaters = sorted(pd.Series(orders_preview.get("theater", [])).dropna().astype(str).str.strip().unique().tolist())
             existing_events = sorted(pd.Series(orders_preview.get("event", [])).dropna().astype(str).str.strip().unique().tolist())
         st.sidebar.info("📊 Using database data")
-        
+
+    # Theater dropdown (optional empty choice)
+    theater = st.sidebar.selectbox("Theater / Venue", options=[""] + existing_theaters, index=0)
+
+    # Event: allow selecting an existing event or typing a new one.
+    event_choice = st.sidebar.selectbox("Choose existing event or select 'Other' to type", options=(existing_events + ["Other"]))
+    if event_choice == "Other":
+        event = st.sidebar.text_input("Event (type new)")
+    else:
+        event = event_choice
+    event_date = st.sidebar.date_input("Event Date", value=datetime.utcnow().date())
+    cnt = st.sidebar.number_input("Ticket count (cnt)", min_value=1, max_value=100, value=1)
+    sold_date = st.sidebar.date_input("Sold Date", value=datetime.utcnow().date())
+
     st.sidebar.header("Data sources")
     doc_id = st.sidebar.text_input("Google Sheets DOC_ID (optional)")
     accounts_tab = st.sidebar.text_input("Accounts tab name", value="Accounts")
@@ -54,114 +67,109 @@ def run_availability_app():
                 df_acc = pd.read_csv(accounts_csv_file)
             except Exception as e:
                 st.error(f"Failed to read CSV: {e}")
-                return
-            
-            # Use 'email' column if present, otherwise use first column
-            if "email" in df_acc.columns:
-                email_col = "email"
-            else:
-                email_col = df_acc.columns[0]
-                
-            emails = df_acc[email_col].dropna().astype(str).str.strip().tolist()
-            st.info(f"Using {len(emails)} emails from uploaded CSV (column: {email_col})")
+                st.stop()
         else:
-            # Load accounts from Google Sheets
             if not doc_id:
-                st.warning("Please provide a Google Sheets DOC_ID or upload a CSV file.")
-                return
-                
+                st.warning("No Google Sheets DOC_ID provided and no CSV uploaded.")
+                st.stop()
+            df_acc = load_accounts_from_sheet(doc_id, accounts_tab)
+            if df_acc is None:
+                st.error("Failed to load accounts from Google Sheets.")
+                st.stop()
+
+        # Orders source: session state first, then database
+        if st.session_state.get('data_loaded', False) and 'sheet_data' in st.session_state:
+            # Use session state data for orders
+            orders_df = st.session_state['sheet_data'].copy()
+            
+            # Rename columns to match expected database column names
+            column_mapping = {
+                'Sold Date': 'sold_date',
+                'Event Date': 'event_date', 
+                'Event': 'event',
+                'Theater': 'theater',
+                'Email': 'email',
+                'CNT': 'cnt'
+            }
+            
+            for old_col, new_col in column_mapping.items():
+                if old_col in orders_df.columns:
+                    orders_df = orders_df.rename(columns={old_col: new_col})
+            
+            # Convert date columns
             try:
-                df_acc = load_accounts_from_sheet(doc_id, accounts_tab)
-                if df_acc is None or df_acc.empty:
-                    st.warning(f"No accounts found in Google Sheets tab '{accounts_tab}'")
-                    return
-                    
-                # Use 'email' column if present, otherwise use first column
-                if "email" in df_acc.columns:
-                    email_col = "email"
-                else:
-                    email_col = df_acc.columns[0]
-                    
-                emails = df_acc[email_col].dropna().astype(str).str.strip().tolist()
-                st.info(f"Using {len(emails)} emails from Google Sheets tab '{accounts_tab}' (column: {email_col})")
+                if 'sold_date' in orders_df.columns:
+                    orders_df['sold_date'] = pd.to_datetime(orders_df['sold_date'], errors='coerce')
+                if 'event_date' in orders_df.columns:
+                    orders_df['event_date'] = pd.to_datetime(orders_df['event_date'], errors='coerce')
+                if 'cnt' in orders_df.columns:
+                    orders_df['cnt'] = pd.to_numeric(orders_df['cnt'], errors='coerce')
             except Exception as e:
-                st.error(f"Failed to load accounts from Google Sheets: {e}")
-                return
-
-        # Load existing orders from database
-        try:
+                st.warning(f"Data conversion issues: {e}")
+                
+            st.info("✅ Using Google Sheets data for orders analysis")
+        else:
+            # Use database data
             engine = get_engine()
-            existing_orders = load_orders_from_db(engine)
-            if existing_orders is None:
-                existing_orders = pd.DataFrame()
-        except Exception as e:
-            st.error(f"Failed to load existing orders: {e}")
-            return
+            orders_df = load_orders_from_db(engine)
+            if orders_df is None or orders_df.empty:
+                st.error("No orders data found in database.")
+                st.stop()
+            st.info("📊 Using database data for orders analysis")
 
-        # Check availability for each email
-        results = []
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        for i, email in enumerate(emails):
-            status_text.text(f"Checking {i+1}/{len(emails)}: {email}")
-            progress_bar.progress((i + 1) / len(emails))
-            
-            is_available, reason = check_email_availability(
-                email=email,
-                event=event,
-                theater=theater,
-                event_date=event_date,
-                sold_date=sold_date,
-                cnt=cnt,
-                existing_orders=existing_orders
-            )
-            
-            results.append({
-                "email": email,
-                "available": is_available,
-                "reason": reason,
-                "event": event,
-                "theater": theater,
-                "event_date": event_date,
-                "cnt": cnt
-            })
-        
-        status_text.text("Check completed!")
-        
-        # Display results
-        results_df = pd.DataFrame(results)
-        
-        # Summary statistics
-        available_count = results_df["available"].sum()
-        total_count = len(results_df)
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Checked", total_count)
-        with col2:
-            st.metric("Available", available_count)
-        with col3:
-            st.metric("Unavailable", total_count - available_count)
-        
-        # Results table
-        st.subheader("Detailed Results")
-        
-        # Color-code the results
-        def highlight_availability(row):
-            if row["available"]:
-                return ["background-color: #d4edda"] * len(row)
-            else:
-                return ["background-color: #f8d7da"] * len(row)
-        
-        styled_df = results_df.style.apply(highlight_availability, axis=1)
-        st.dataframe(styled_df, use_container_width=True)
-        
-        # Download results
-        csv = results_df.to_csv(index=False)
-        st.download_button(
-            label="Download Results as CSV",
-            data=csv,
-            file_name=f"availability_check_{today.strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
+        # Run the availability check
+        result_df = check_email_availability(
+            accounts_df=df_acc,
+            orders_df=orders_df,
+            prospective_event=event,
+            prospective_theater=theater,
+            prospective_event_date=pd.Timestamp(event_date),
+            prospective_cnt=cnt,
+            prospective_sold_date=pd.Timestamp(sold_date),
         )
+
+        if result_df is not None and not result_df.empty:
+            st.success(f"✅ Found {len(result_df)} available accounts!")
+            
+            # Display results
+            st.subheader("Available Accounts")
+            st.dataframe(result_df)
+            
+            # Summary stats
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Available Accounts", len(result_df))
+            with col2:
+                if 'total_cnt' in result_df.columns:
+                    avg_tickets = result_df['total_cnt'].mean()
+                    st.metric("Avg Tickets/Account", f"{avg_tickets:.1f}")
+            with col3:
+                if 'last_purchase_days_ago' in result_df.columns:
+                    avg_days = result_df['last_purchase_days_ago'].mean()
+                    st.metric("Avg Days Since Last Purchase", f"{avg_days:.0f}")
+            
+            # Download option
+            csv = result_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Results as CSV",
+                data=csv,
+                file_name=f"available_accounts_{event}_{event_date}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.warning("⚠️ No available accounts found matching your criteria.")
+            
+        # Show some debug info
+        with st.expander("🔍 Debug Information"):
+            st.write(f"**Accounts loaded:** {len(df_acc) if df_acc is not None else 0}")
+            st.write(f"**Orders loaded:** {len(orders_df) if orders_df is not None else 0}")
+            st.write(f"**Search criteria:**")
+            st.write(f"- Event: {event}")
+            st.write(f"- Theater: {theater}")
+            st.write(f"- Event Date: {event_date}")
+            st.write(f"- Ticket Count: {cnt}")
+            st.write(f"- Sold Date: {sold_date}")
+            
+            if orders_df is not None and not orders_df.empty:
+                st.write("**Orders data sample:**")
+                st.dataframe(orders_df.head())

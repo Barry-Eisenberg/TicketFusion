@@ -116,29 +116,30 @@ elif app_choice == "Account Availability Checker":
         with st.expander("Debug Information"):
             st.code(traceback.format_exc())
 
-# If we have very few rows, offer to load data
+# Check row count in sheet_facts if it exists
 if 'sheet_facts' in tables:
-    result = conn.execute(text("SELECT COUNT(*) FROM sheet_facts"))
-    row_count = result.fetchone()[0]
-    st.info(f"📊 Sheet facts table has {row_count} rows")
-    
-    if row_count <= 5:
-        st.warning("⚠️ Very few data rows detected. You may want to load data from Google Sheets.")
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT COUNT(*) FROM sheet_facts"))
+        row_count = result.fetchone()[0]
+        st.info(f"📊 Sheet facts table has {row_count} rows")
         
-        if st.button("🔄 Load Data from Google Sheets"):
-            try:
-                with st.spinner("Loading data from Google Sheets..."):
-                    import subprocess
-                    import sys
-                    result = subprocess.run([sys.executable, "ingest.py"], 
-                                          capture_output=True, text=True, cwd=".")
-                    
-                    if result.returncode == 0:
-                        st.success("✅ Data loaded successfully!")
-                        st.rerun()
-                    else:
-                        st.error("❌ Failed to load data")
-                        st.code(result.stderr)
+        if row_count <= 5:
+            st.warning("⚠️ Very few data rows detected. You may want to load data from Google Sheets.")
+            
+            if st.button("🔄 Load Data from Google Sheets"):
+                try:
+                    with st.spinner("Loading data from Google Sheets..."):
+                        import subprocess
+                        import sys
+                        result = subprocess.run([sys.executable, "ingest.py"], 
+                                              capture_output=True, text=True, cwd=".")
                         
-            except Exception as e:
-                st.error(f"❌ Error: {str(e)}")
+                        if result.returncode == 0:
+                            st.success("✅ Data loaded successfully!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to load data")
+                            st.code(result.stderr)
+                            
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")

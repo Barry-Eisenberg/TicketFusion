@@ -1,3 +1,10 @@
+# Core web app dependencies
 streamlit==1.37.1
 pandas==2.2.3
+
+# Google Sheets integration
+gspread==6.1.4
+google-auth==2.34.0
+
+# Visualization
 plotly>=5.0.0

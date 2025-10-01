@@ -111,27 +111,56 @@ if app_choice == "Home":
                                     sheet = gc.open_by_key(doc_id).worksheet("Orders")
                                     
                                     # Get all values and convert to DataFrame
+                                    st.write("📥 Fetching all data from Google Sheets...")
                                     values = sheet.get_all_values()
+                                    st.write(f"✅ Raw data fetched: {len(values)} total rows")
+                                    
                                     if len(values) > 4:  # Skip header rows
                                         headers = values[3]  # Row 4 (index 3) contains headers
                                         data_rows = values[4:]  # Data starts from row 5
+                                        st.write(f"📋 Headers: {len(headers)} columns")
+                                        st.write(f"📊 Data rows available: {len(data_rows)}")
                                         
                                         # Create DataFrame
                                         df = pd.DataFrame(data_rows, columns=headers)
+                                        st.write(f"📊 DataFrame created: {df.shape[0]} rows × {df.shape[1]} columns")
                                         
-                                        # Filter out empty rows
+                                        # Filter out empty rows - step by step for debugging
+                                        initial_count = len(df)
                                         df = df.dropna(how='all')
+                                        after_dropna = len(df)
+                                        st.write(f"🧹 After removing completely empty rows: {after_dropna} (removed {initial_count - after_dropna})")
+                                        
                                         df = df[df['Event'].notna() & (df['Event'] != '')]
+                                        final_count = len(df)
+                                        st.write(f"🧹 After removing rows with empty Events: {final_count} (removed {after_dropna - final_count})")
                                         
-                                        # Store in session state
-                                        st.session_state['sheet_data'] = df
-                                        st.session_state['data_loaded'] = True
-                                        st.session_state['last_updated'] = datetime.now()
-                                        
-                                        st.success(f"✅ Data loaded successfully! {len(df)} rows imported from Google Sheets")
-                                        st.rerun()  # Refresh the page to show new data
+                                        if not df.empty:
+                                            # Show memory usage
+                                            memory_usage = df.memory_usage(deep=True).sum() / 1024 / 1024  # MB
+                                            st.write(f"💾 DataFrame memory usage: {memory_usage:.2f} MB")
+                                            
+                                            # Store in session state
+                                            st.session_state['sheet_data'] = df
+                                            st.session_state['data_loaded'] = True
+                                            st.session_state['last_updated'] = datetime.now()
+                                            
+                                            st.success(f"✅ Data loaded successfully! {len(df)} rows imported from Google Sheets")
+                                            
+                                            # Verify session state storage
+                                            stored_df = st.session_state.get('sheet_data')
+                                            if stored_df is not None:
+                                                st.write(f"✅ Verified in session state: {len(stored_df)} rows")
+                                                st.write(f"📊 Sample events: {stored_df['Event'].head().tolist()}")
+                                                st.write(f"📊 Unique events: {stored_df['Event'].nunique()}")
+                                            else:
+                                                st.error("❌ Failed to store data in session state")
+                                            
+                                            st.rerun()  # Refresh the page to show new data
+                                        else:
+                                            st.error("❌ No valid data found after filtering")
                                     else:
-                                        st.error("❌ No data found in Google Sheets")
+                                        st.error("❌ Not enough rows in Google Sheets")
                                         
                             except Exception as e:
                                 st.error(f"❌ Error loading data: {str(e)}")

@@ -14,28 +14,33 @@ def run_availability_app():
     st.title("Account Availability Checker")
 
     st.sidebar.header("Prospective purchase")
-    # We'll load existing events/theaters from Orders to populate helpers.
-    engine_preview = get_engine()
-    orders_preview = load_orders_from_db(engine_preview)
+    
+    # Load existing events/theaters - check session state first, then database
     existing_theaters = []
     existing_events = []
-    if orders_preview is not None and not orders_preview.empty:
-        existing_theaters = sorted(pd.Series(orders_preview.get("theater", [])).dropna().astype(str).str.strip().unique().tolist())
-        existing_events = sorted(pd.Series(orders_preview.get("event", [])).dropna().astype(str).str.strip().unique().tolist())
-
-    # Theater dropdown (optional empty choice)
-    theater = st.sidebar.selectbox("Theater / Venue", options=[""] + existing_theaters, index=0)
-
-    # Event: allow selecting an existing event or typing a new one.
-    event_choice = st.sidebar.selectbox("Choose existing event or select 'Other' to type", options=(existing_events + ["Other"]))
-    if event_choice == "Other":
-        event = st.sidebar.text_input("Event (type new)")
+    
+    if st.session_state.get('data_loaded', False) and 'sheet_data' in st.session_state:
+        # Use session state data
+        orders_preview = st.session_state['sheet_data'].copy()
+        if orders_preview is not None and not orders_preview.empty:
+            # Use original column names from Google Sheets
+            theater_col = 'Theater' if 'Theater' in orders_preview.columns else 'theater'
+            event_col = 'Event' if 'Event' in orders_preview.columns else 'event'
+            
+            if theater_col in orders_preview.columns:
+                existing_theaters = sorted(pd.Series(orders_preview[theater_col]).dropna().astype(str).str.strip().unique().tolist())
+            if event_col in orders_preview.columns:
+                existing_events = sorted(pd.Series(orders_preview[event_col]).dropna().astype(str).str.strip().unique().tolist())
+        st.sidebar.success("✅ Using data from Google Sheets")
     else:
-        event = event_choice
-    event_date = st.sidebar.date_input("Event Date", value=datetime.utcnow().date())
-    cnt = st.sidebar.number_input("Ticket count (cnt)", min_value=1, max_value=100, value=1)
-    sold_date = st.sidebar.date_input("Sold Date", value=datetime.utcnow().date())
-
+        # Use database data
+        engine_preview = get_engine()
+        orders_preview = load_orders_from_db(engine_preview)
+        if orders_preview is not None and not orders_preview.empty:
+            existing_theaters = sorted(pd.Series(orders_preview.get("theater", [])).dropna().astype(str).str.strip().unique().tolist())
+            existing_events = sorted(pd.Series(orders_preview.get("event", [])).dropna().astype(str).str.strip().unique().tolist())
+        st.sidebar.info("📊 Using database data")
+        
     st.sidebar.header("Data sources")
     doc_id = st.sidebar.text_input("Google Sheets DOC_ID (optional)")
     accounts_tab = st.sidebar.text_input("Accounts tab name", value="Accounts")

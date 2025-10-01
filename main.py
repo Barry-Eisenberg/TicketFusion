@@ -79,23 +79,64 @@ if app_choice == "Home":
                         if st.button("🔄 Load Data from Google Sheets", help="This will import data from your configured Google Sheets document"):
                             try:
                                 with st.spinner("Loading data from Google Sheets..."):
-                                    # Import and run the ingest function
-                                    import subprocess
-                                    import sys
+                                    # Load data directly into session state (for cloud deployment)
+                                    import pandas as pd
+                                    from datetime import datetime
                                     
-                                    # Try to run ingest.py as a subprocess
-                                    result = subprocess.run([sys.executable, "ingest.py"], 
-                                                          capture_output=True, text=True, cwd=".")
+                                    # Import the Google Sheets reading functionality
+                                    import gspread
+                                    from google.oauth2.service_account import Credentials
+                                    import os
                                     
-                                    if result.returncode == 0:
-                                        st.success("✅ Data loaded successfully from Google Sheets!")
+                                    # Get credentials
+                                    if hasattr(st, 'secrets') and "google_service_account" in st.secrets:
+                                        service_account_info = dict(st.secrets["google_service_account"])
+                                        creds = Credentials.from_service_account_info(
+                                            service_account_info, 
+                                            scopes=["https://www.googleapis.com/auth/spreadsheets.readonly", 
+                                                   "https://www.googleapis.com/auth/drive.readonly"]
+                                        )
+                                    else:
+                                        st.error("❌ Google service account credentials not found in secrets")
+                                        st.stop()
+                                    
+                                    # Get document ID
+                                    doc_id = st.secrets.get("GOOGLE_SHEETS_DOC_ID") if hasattr(st, 'secrets') else None
+                                    if not doc_id:
+                                        st.error("❌ Google Sheets document ID not found in secrets")
+                                        st.stop()
+                                    
+                                    # Connect and read data
+                                    gc = gspread.authorize(creds)
+                                    sheet = gc.open_by_key(doc_id).worksheet("Orders")
+                                    
+                                    # Get all values and convert to DataFrame
+                                    values = sheet.get_all_values()
+                                    if len(values) > 4:  # Skip header rows
+                                        headers = values[3]  # Row 4 (index 3) contains headers
+                                        data_rows = values[4:]  # Data starts from row 5
+                                        
+                                        # Create DataFrame
+                                        df = pd.DataFrame(data_rows, columns=headers)
+                                        
+                                        # Filter out empty rows
+                                        df = df.dropna(how='all')
+                                        df = df[df['Event'].notna() & (df['Event'] != '')]
+                                        
+                                        # Store in session state
+                                        st.session_state['sheet_data'] = df
+                                        st.session_state['data_loaded'] = True
+                                        st.session_state['last_updated'] = datetime.now()
+                                        
+                                        st.success(f"✅ Data loaded successfully! {len(df)} rows imported from Google Sheets")
                                         st.rerun()  # Refresh the page to show new data
                                     else:
-                                        st.error("❌ Failed to load data from Google Sheets")
-                                        st.code(result.stderr)
+                                        st.error("❌ No data found in Google Sheets")
                                         
                             except Exception as e:
                                 st.error(f"❌ Error loading data: {str(e)}")
+                                import traceback
+                                st.text(traceback.format_exc())
                 
                 with st.expander("View Tables"):
                     for table in tables:

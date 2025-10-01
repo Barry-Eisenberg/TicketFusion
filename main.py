@@ -60,16 +60,39 @@ if app_choice == "Home":
             result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table';"))
             tables = [row[0] for row in result.fetchall()]
         
-        if tables:
-            st.success(f"✅ Database connected ({len(tables)} tables found)")
-            with st.expander("View Tables"):
-                for table in tables:
-                    st.text(f"• {table}")
-        else:
-            st.warning("⚠️ Database connected but no tables found")
+if tables:
+    st.success(f"✅ Database connected ({len(tables)} tables found)")
+    
+    # Check row count in sheet_facts if it exists
+    if 'sheet_facts' in tables:
+        result = conn.execute(text("SELECT COUNT(*) FROM sheet_facts"))
+        row_count = result.fetchone()[0]
+        st.info(f"📊 Sheet facts table has {row_count} rows")
+        
+        if row_count <= 5:
+            st.warning("⚠️ Very few data rows detected. You may want to load data from Google Sheets.")
             
-    except Exception as e:
-        st.error(f"❌ Database connection failed: {str(e)}")
+            if st.button("🔄 Load Data from Google Sheets"):
+                try:
+                    with st.spinner("Loading data from Google Sheets..."):
+                        import subprocess
+                        import sys
+                        result = subprocess.run([sys.executable, "ingest.py"], 
+                                              capture_output=True, text=True, cwd=".")
+                        
+                        if result.returncode == 0:
+                            st.success("✅ Data loaded successfully!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to load data")
+                            st.code(result.stderr)
+                            
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
+    
+    with st.expander("View Tables"):
+        for table in tables:
+            st.text(f"• {table}")
     
     # Check for service account
     import os
@@ -115,31 +138,3 @@ elif app_choice == "Account Availability Checker":
         import traceback
         with st.expander("Debug Information"):
             st.code(traceback.format_exc())
-
-# Check row count in sheet_facts if it exists
-if 'sheet_facts' in tables:
-    with engine.connect() as conn:
-        result = conn.execute(text("SELECT COUNT(*) FROM sheet_facts"))
-        row_count = result.fetchone()[0]
-        st.info(f"📊 Sheet facts table has {row_count} rows")
-        
-        if row_count <= 5:
-            st.warning("⚠️ Very few data rows detected. You may want to load data from Google Sheets.")
-            
-            if st.button("🔄 Load Data from Google Sheets"):
-                try:
-                    with st.spinner("Loading data from Google Sheets..."):
-                        import subprocess
-                        import sys
-                        result = subprocess.run([sys.executable, "ingest.py"], 
-                                              capture_output=True, text=True, cwd=".")
-                        
-                        if result.returncode == 0:
-                            st.success("✅ Data loaded successfully!")
-                            st.rerun()
-                        else:
-                            st.error("❌ Failed to load data")
-                            st.code(result.stderr)
-                            
-                except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")

@@ -51,7 +51,7 @@ if app_choice == "Home":
     st.markdown("---")
     st.subheader("System Status")
     
-    # Check database connection
+    # Check database connection and row count
     try:
         from db import get_engine
         from sqlalchemy import text
@@ -59,42 +59,54 @@ if app_choice == "Home":
         with engine.connect() as conn:
             result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table';"))
             tables = [row[0] for row in result.fetchall()]
-        
-if tables:
-    st.success(f"✅ Database connected ({len(tables)} tables found)")
-    
-    # Check row count in sheet_facts if it exists
-    if 'sheet_facts' in tables:
-        result = conn.execute(text("SELECT COUNT(*) FROM sheet_facts"))
-        row_count = result.fetchone()[0]
-        st.info(f"📊 Sheet facts table has {row_count} rows")
-        
-        if row_count <= 5:
-            st.warning("⚠️ Very few data rows detected. You may want to load data from Google Sheets.")
             
-            if st.button("🔄 Load Data from Google Sheets"):
-                try:
-                    with st.spinner("Loading data from Google Sheets..."):
-                        import subprocess
-                        import sys
-                        result = subprocess.run([sys.executable, "ingest.py"], 
-                                              capture_output=True, text=True, cwd=".")
+            # Check row count in sheet_facts
+            row_count = 0
+            if 'sheet_facts' in tables:
+                result = conn.execute(text("SELECT COUNT(*) FROM sheet_facts"))
+                row_count = result.fetchone()[0]
+            
+            if tables:
+                st.success(f"✅ Database connected ({len(tables)} tables found)")
+                if 'sheet_facts' in tables:
+                    st.info(f"📊 Sheet facts table has {row_count} rows")
+                    
+                    # If we have very few rows, offer to load data
+                    if row_count <= 5:
+                        st.warning("⚠️ Very few data rows detected. You may want to load data from Google Sheets.")
                         
-                        if result.returncode == 0:
-                            st.success("✅ Data loaded successfully!")
-                            st.rerun()
-                        else:
-                            st.error("❌ Failed to load data")
-                            st.code(result.stderr)
-                            
-                except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
-    
-    with st.expander("View Tables"):
-        for table in tables:
-            st.text(f"• {table}")
-    
-    # Check for service account
+                        # Add a button to load data from Google Sheets
+                        if st.button("🔄 Load Data from Google Sheets", help="This will import data from your configured Google Sheets document"):
+                            try:
+                                with st.spinner("Loading data from Google Sheets..."):
+                                    # Import and run the ingest function
+                                    import subprocess
+                                    import sys
+                                    
+                                    # Try to run ingest.py as a subprocess
+                                    result = subprocess.run([sys.executable, "ingest.py"], 
+                                                          capture_output=True, text=True, cwd=".")
+                                    
+                                    if result.returncode == 0:
+                                        st.success("✅ Data loaded successfully from Google Sheets!")
+                                        st.rerun()  # Refresh the page to show new data
+                                    else:
+                                        st.error("❌ Failed to load data from Google Sheets")
+                                        st.code(result.stderr)
+                                        
+                            except Exception as e:
+                                st.error(f"❌ Error loading data: {str(e)}")
+                
+                with st.expander("View Tables"):
+                    for table in tables:
+                        st.text(f"• {table}")
+            else:
+                st.warning("⚠️ Database connected but no tables found")
+                
+    except Exception as e:
+        st.error(f"❌ Database connection failed: {str(e)}")
+
+        # Check for service account
     import os
     from pathlib import Path
     service_account_path = Path("service_account.json")

@@ -117,11 +117,99 @@ st.markdown("---")
 with st.spinner("Loading data from Google Sheets..."):
     sheets_data = load_google_sheets_data()
 
-# Show basic info
-st.write("Data loaded successfully!")
-if sheets_data:
-    st.write(f"Loaded {len(sheets_data)} worksheets")
-    for name, df in sheets_data.items():
-        st.write(f"- {name}: {len(df)} rows")
-else:
-    st.write("No data loaded")
+# Sidebar navigation
+st.sidebar.title("Navigation")
+app_choice = st.sidebar.selectbox(
+    "Choose an application:",
+    ["Home", "Google Sheets Analytics", "Account Availability Checker"]
+)
+
+if app_choice == "Home":
+    st.header("Welcome to TicketFusion")
+    st.write("Your integrated ticketing and analytics platform.")
+    
+    # Quick Summary
+    if sheets_data:
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("📊 Total Sheets", len(sheets_data))
+        with col2:
+            total_rows = sum(len(df) for df in sheets_data.values())
+            st.metric("📋 Total Records", f"{total_rows:,}")
+        with col3:
+            if 'Orders' in sheets_data:
+                st.metric("🛒 Orders", len(sheets_data['Orders']))
+            else:
+                st.metric("🛒 Orders", "N/A")
+        with col4:
+            if 'Accounts' in sheets_data:
+                st.metric("👥 Accounts", len(sheets_data['Accounts']))
+            else:
+                st.metric("👥 Accounts", "N/A")
+        
+        st.markdown("---")
+    
+    # Show basic data status
+    st.subheader("📊 Data Status")
+    if sheets_data:
+        st.success(f"✅ Connected to Google Sheets - {len(sheets_data)} worksheets loaded")
+        
+        st.write("**Loaded sheets:**")
+        for sheet_name, df in sheets_data.items():
+            st.write(f"• **{sheet_name}**: {len(df)} rows, {len(df.columns)} columns")
+    else:
+        st.error("❌ No data loaded")
+
+elif app_choice == "Google Sheets Analytics":
+    st.header("📈 Analytics Dashboard")
+    
+    if not sheets_data:
+        st.error("No data available for analytics")
+        st.stop()
+    
+    # Sheet selection
+    sheet_names = list(sheets_data.keys())
+    selected_sheet = st.selectbox("Select data sheet:", sheet_names)
+    
+    if selected_sheet and selected_sheet in sheets_data:
+        df = sheets_data[selected_sheet].copy()
+        
+        if df.empty:
+            st.warning("Selected sheet is empty")
+            st.stop()
+        
+        st.subheader(f"Data from: {selected_sheet}")
+        
+        # Show raw data
+        with st.expander("📋 View Raw Data"):
+            st.dataframe(df)
+        
+        # Show basic stats
+        st.write(f"**Rows:** {len(df)}")
+        st.write(f"**Columns:** {len(df.columns)}")
+        st.write(f"**Column names:** {', '.join(df.columns)}")
+
+elif app_choice == "Account Availability Checker":
+    st.header("🔍 Account Availability Analysis")
+    
+    if not sheets_data:
+        st.error("No data available for availability analysis")
+        st.stop()
+    
+    # Show available sheets
+    st.subheader("📊 Available Data Sheets")
+    sheet_names = list(sheets_data.keys())
+    
+    for sheet_name in sheet_names:
+        df = sheets_data[sheet_name]
+        st.write(f"• **{sheet_name}**: {len(df)} rows, {len(df.columns)} columns")
+    
+    # Basic availability info
+    if 'ProfileAvailability' in sheets_data:
+        df = sheets_data['ProfileAvailability']
+        st.subheader("ProfileAvailability Summary")
+        st.write(f"Total records: {len(df)}")
+        st.dataframe(df.head())
+    else:
+        st.warning("ProfileAvailability sheet not found")

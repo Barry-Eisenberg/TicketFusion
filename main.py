@@ -292,54 +292,52 @@ elif app_choice == "Account Availability Checker":
         st.write(f"**Profile Availability Data** ({len(df)} records)")
         
         # Show available columns for debugging
-        with st.expander("📋 View Available Columns"):
+        with st.expander("📋 View Available Columns and Sample Data"):
             st.write("**Columns in ProfileAvailability data:**")
-            st.write(list(df.columns))
-        
-        # Look for venue/theater columns with broader search
-        venue_cols = [col for col in df.columns if any(word in col.lower() for word in ['venue', 'theater', 'theatre', 'location', 'site', 'place', 'facility', 'hall', 'auditorium', 'center', 'centre'])]
-        
-        if venue_cols:
-            venue_col = venue_cols[0]
-            venues = df[venue_col].dropna().unique()
-            st.write(f"**Found venue column**: {venue_col}")
-            selected_venue = st.selectbox("Select Venue/Theater:", venues)
+            for i, col in enumerate(df.columns):
+                st.write(f"{i}: {col}")
             
-            if st.button("🔍 Analyze Availability"):
-                venue_data = df[df[venue_col] == selected_venue]
-                st.write(f"**Results for {selected_venue}:**")
-                st.dataframe(venue_data)
-                
-                # Basic stats
-                if not venue_data.empty:
-                    st.metric("Total Records", len(venue_data))
-                    
-                    # Look for availability indicators
-                    availability_cols = [col for col in venue_data.columns if any(word in col.lower() for word in ['available', 'capacity', 'status'])]
-                    if availability_cols:
-                        for col in availability_cols:
-                            if venue_data[col].dtype in ['int64', 'float64']:
-                                st.metric(f"Total {col}", venue_data[col].sum())
-        else:
-            st.warning("No specific venue/theater column found. Available columns:")
-            st.write(list(df.columns))
+            st.write("**Sample data (first 3 rows):**")
+            st.dataframe(df.head(3))
+        
+        # Since columns are showing as generic names, let's look at the actual data
+        # The first column appears to contain email addresses
+        if len(df.columns) > 0:
+            # Use the first column as the primary identifier (likely email/account)
+            primary_col = df.columns[0]
+            st.write(f"**Using primary column**: {primary_col}")
             
-            # Let user manually select a column to analyze
-            if len(df.columns) > 0:
-                selected_col = st.selectbox("Select a column to analyze:", df.columns)
-                unique_values = df[selected_col].dropna().unique()
+            # Get unique values from the first column
+            unique_values = df[primary_col].dropna().unique()
+            
+            if len(unique_values) > 0:
+                st.write(f"**Found {len(unique_values)} unique accounts/profiles**")
+                selected_account = st.selectbox("Select Account/Profile:", unique_values[:20])  # Limit to first 20 for performance
                 
-                if len(unique_values) > 0:
-                    selected_value = st.selectbox(f"Select {selected_col}:", unique_values)
+                if st.button("🔍 Analyze Profile Availability"):
+                    profile_data = df[df[primary_col] == selected_account]
+                    st.write(f"**Results for {selected_account}:**")
+                    st.dataframe(profile_data)
                     
-                    if st.button("🔍 Analyze Data"):
-                        filtered_data = df[df[selected_col] == selected_value]
-                        st.write(f"**Results for {selected_col} = {selected_value}:**")
-                        st.dataframe(filtered_data)
-                        st.metric("Total Records", len(filtered_data))
-                else:
-                    st.warning(f"No data found in column {selected_col}")
+                    # Basic stats
+                    if not profile_data.empty:
+                        st.metric("Total Records", len(profile_data))
+                        
+                        # Show non-empty columns for this profile
+                        non_empty_cols = []
+                        for col in profile_data.columns:
+                            if profile_data[col].notna().any() and profile_data[col].astype(str).str.strip().ne('').any():
+                                non_empty_cols.append(col)
+                        
+                        if non_empty_cols:
+                            st.write(f"**Columns with data**: {len(non_empty_cols)}")
+                            for col in non_empty_cols[:10]:  # Show first 10
+                                unique_vals = profile_data[col].dropna().unique()
+                                if len(unique_vals) <= 5:  # Only show if few unique values
+                                    st.write(f"• {col}: {', '.join(map(str, unique_vals))}")
             else:
-                st.error("No columns available for analysis")
+                st.warning("No data found in the primary column")
+        else:
+            st.error("No columns available for analysis")
     else:
         st.error("ProfileAvailability sheet not found in the data")

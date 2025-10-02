@@ -44,12 +44,47 @@ def load_google_sheets_data():
         data = {}
         for worksheet in worksheets:
             try:
-                records = worksheet.get_all_records()
-                if records:
-                    df = pd.DataFrame(records)
-                    data[worksheet.title] = df
+                # First try getting all records normally
+                try:
+                    records = worksheet.get_all_records()
+                    if records:
+                        df = pd.DataFrame(records)
+                        data[worksheet.title] = df
+                        st.success(f"✅ Loaded '{worksheet.title}': {len(df)} rows")
+                except Exception as header_error:
+                    # If header issue, try alternative method
+                    if "header row" in str(header_error).lower() and "not unique" in str(header_error).lower():
+                        st.warning(f"⚠️ '{worksheet.title}' has duplicate headers, using alternative loading method...")
+                        
+                        # Get all values and create DataFrame manually
+                        all_values = worksheet.get_all_values()
+                        if all_values and len(all_values) > 1:
+                            # Use first row as headers, but make them unique
+                            headers = all_values[0]
+                            unique_headers = []
+                            header_counts = {}
+                            
+                            for header in headers:
+                                if header in header_counts:
+                                    header_counts[header] += 1
+                                    unique_header = f"{header}_{header_counts[header]}"
+                                else:
+                                    header_counts[header] = 0
+                                    unique_header = header
+                                unique_headers.append(unique_header)
+                            
+                            # Create DataFrame with unique headers
+                            df = pd.DataFrame(all_values[1:], columns=unique_headers)
+                            data[worksheet.title] = df
+                            st.success(f"✅ Loaded '{worksheet.title}': {len(df)} rows (fixed duplicate headers)")
+                        else:
+                            st.warning(f"⚠️ '{worksheet.title}' appears to be empty")
+                    else:
+                        raise header_error
+                        
             except Exception as e:
-                st.warning(f"Could not load worksheet '{worksheet.title}': {str(e)}")
+                st.warning(f"❌ Could not load worksheet '{worksheet.title}': {str(e)}")
+                continue
         
         return data
         
@@ -97,8 +132,19 @@ if app_choice == "Home":
     st.subheader("📊 Data Status")
     if sheets_data:
         st.success(f"✅ Connected to Google Sheets - {len(sheets_data)} worksheets loaded")
+        
+        # Show detailed info for each sheet
         for sheet_name, df in sheets_data.items():
-            st.write(f"• **{sheet_name}**: {len(df)} rows, {len(df.columns)} columns")
+            with st.expander(f"📋 {sheet_name} Details"):
+                st.write(f"**Rows**: {len(df)} | **Columns**: {len(df.columns)}")
+                st.write(f"**Column names**: {list(df.columns)}")
+                
+                # Show first few rows
+                if not df.empty:
+                    st.write("**Sample data**:")
+                    st.dataframe(df.head(3))
+                else:
+                    st.write("*No data in this sheet*")
     else:
         st.error("❌ No data loaded")
     

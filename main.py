@@ -192,92 +192,92 @@ elif app_choice == "Google Sheets Analytics":
     if df.empty:
         st.warning("No order data available for analytics")
         st.stop()
+    
+    # Revenue Analysis - more flexible column detection
+    revenue_cols = [col for col in df.columns if any(word in col.lower() for word in ['revenue', 'income', 'sales', 'amount', 'total', 'price', 'cost'])]
+    cost_cols = [col for col in df.columns if any(word in col.lower() for word in ['cost', 'expense', 'fee', 'charge'])]
+    
+    # st.write(f"**Found potential financial columns**: {revenue_cols + cost_cols}")
+    
+    if revenue_cols or cost_cols:
+        st.subheader("💰 Financial Analysis")
         
-        # Revenue Analysis - more flexible column detection
-        revenue_cols = [col for col in df.columns if any(word in col.lower() for word in ['revenue', 'income', 'sales', 'amount', 'total', 'price', 'cost'])]
-        cost_cols = [col for col in df.columns if any(word in col.lower() for word in ['cost', 'expense', 'fee', 'charge'])]
+        col1, col2 = st.columns(2)
         
-        # st.write(f"**Found potential financial columns**: {revenue_cols + cost_cols}")
-        
-        if revenue_cols or cost_cols:
-            st.subheader("💰 Financial Analysis")
-            
-            col1, col2 = st.columns(2)
-            
-            # Revenue chart
-            if revenue_cols:
-                with col1:
-                    st.write("**Revenue Analysis**")
-                    revenue_col = revenue_cols[0]
-                    
-                    # Clean currency data
-                    df = clean_currency_column(df, revenue_col)
-                    
-                    if df[revenue_col].notna().any():
-                        if 'Theater' in df.columns:
-                            fig_revenue = px.bar(df, x='Theater', y=revenue_col, 
-                                              title=f'Revenue by Theater')
-                        else:
-                            fig_revenue = px.bar(df, y=revenue_col, 
-                                              title=f'Revenue Distribution')
-                        st.plotly_chart(fig_revenue, use_container_width=True)
-                        
-                        # Revenue stats
-                        total_revenue = df[revenue_col].sum()
-                        avg_revenue = df[revenue_col].mean()
-                        st.metric("Total Revenue", f"${total_revenue:,.2f}")
-                        st.metric("Average Revenue", f"${avg_revenue:,.2f}")
-            
-            # Cost chart
-            if cost_cols:
-                with col2:
-                    st.write("**Cost Analysis**")
-                    cost_col = cost_cols[0]
-                    
-                    # Clean currency data
-                    df = clean_currency_column(df, cost_col)
-                    
-                    if df[cost_col].notna().any():
-                        if 'Theater' in df.columns:
-                            fig_cost = px.bar(df, x='Theater', y=cost_col, 
-                                            title=f'Cost by Theater', color_discrete_sequence=['red'])
-                        else:
-                            fig_cost = px.bar(df, y=cost_col, 
-                                            title=f'Cost Distribution', color_discrete_sequence=['red'])
-                        st.plotly_chart(fig_cost, use_container_width=True)
-                        
-                        # Cost stats
-                        total_cost = df[cost_col].sum()
-                        avg_cost = df[cost_col].mean()
-                        st.metric("Total Cost", f"${total_cost:,.2f}")
-                        st.metric("Average Cost", f"${avg_cost:,.2f}")
-            
-            # Profit analysis
-            if revenue_cols and cost_cols:
-                st.subheader("📊 Profit Analysis")
+        # Revenue chart
+        if revenue_cols:
+            with col1:
+                st.write("**Revenue Analysis**")
                 revenue_col = revenue_cols[0]
+                
+                # Clean currency data
+                df = clean_currency_column(df, revenue_col)
+                
+                if df[revenue_col].notna().any():
+                    if 'Theater' in df.columns:
+                        fig_revenue = px.bar(df, x='Theater', y=revenue_col, 
+                                          title=f'Revenue by Theater')
+                    else:
+                        fig_revenue = px.bar(df, y=revenue_col, 
+                                          title=f'Revenue Distribution')
+                    st.plotly_chart(fig_revenue, use_container_width=True)
+                    
+                    # Revenue stats
+                    total_revenue = df[revenue_col].sum()
+                    avg_revenue = df[revenue_col].mean()
+                    st.metric("Total Revenue", f"${total_revenue:,.2f}")
+                    st.metric("Average Revenue", f"${avg_revenue:,.2f}")
+        
+        # Cost chart
+        if cost_cols:
+            with col2:
+                st.write("**Cost Analysis**")
                 cost_col = cost_cols[0]
                 
-                df['Profit'] = df[revenue_col] - df[cost_col]
+                # Clean currency data
+                df = clean_currency_column(df, cost_col)
                 
-                if 'Theater' in df.columns:
-                    fig_profit = px.bar(df, x='Theater', y='Profit', 
-                                      title='Profit by Theater',
-                                      color='Profit',
-                                      color_continuous_scale='RdYlGn')
-                    st.plotly_chart(fig_profit, use_container_width=True)
-                
-                total_profit = df['Profit'].sum()
-                avg_profit = df['Profit'].mean()
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Total Profit", f"${total_profit:,.2f}")
-                with col2:
-                    st.metric("Average Profit", f"${avg_profit:,.2f}")
+                if df[cost_col].notna().any():
+                    if 'Theater' in df.columns:
+                        fig_cost = px.bar(df, x='Theater', y=cost_col, 
+                                        title=f'Cost by Theater', color_discrete_sequence=['red'])
+                    else:
+                        fig_cost = px.bar(df, y=cost_col, 
+                                        title=f'Cost Distribution', color_discrete_sequence=['red'])
+                    st.plotly_chart(fig_cost, use_container_width=True)
+                    
+                    # Cost stats
+                    total_cost = df[cost_col].sum()
+                    avg_cost = df[cost_col].mean()
+                    st.metric("Total Cost", f"${total_cost:,.2f}")
+                    st.metric("Average Cost", f"${avg_cost:,.2f}")
         
-        else:
-            st.info("No revenue or cost columns found in the selected sheet.")
-            st.write("Available columns:", list(df.columns))
+        # Profit analysis
+        if revenue_cols and cost_cols:
+            st.subheader("📊 Profit Analysis")
+            revenue_col = revenue_cols[0]
+            cost_col = cost_cols[0]
+            
+            df['Profit'] = df[revenue_col] - df[cost_col]
+            
+            if 'Theater' in df.columns:
+                fig_profit = px.bar(df, x='Theater', y='Profit', 
+                                  title='Profit by Theater',
+                                  color='Profit',
+                                  color_continuous_scale='RdYlGn')
+                st.plotly_chart(fig_profit, use_container_width=True)
+            
+            total_profit = df['Profit'].sum()
+            avg_profit = df['Profit'].mean()
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Total Profit", f"${total_profit:,.2f}")
+            with col2:
+                st.metric("Average Profit", f"${avg_profit:,.2f}")
+    
+    else:
+        st.info("No revenue or cost columns found in the selected sheet.")
+        st.write("Available columns:", list(df.columns))
 
 elif app_choice == "Account Availability Checker":
     st.header("🎫 Account Availability Checker")
@@ -291,11 +291,18 @@ elif app_choice == "Account Availability Checker":
         df = sheets_data['ProfileAvailability'].copy()
         st.write(f"**Profile Availability Data** ({len(df)} records)")
         
-        # Look for venue/theater columns
-        venue_cols = [col for col in df.columns if any(word in col.lower() for word in ['venue', 'theater', 'theatre', 'location'])]
+        # Show available columns for debugging
+        with st.expander("📋 View Available Columns"):
+            st.write("**Columns in ProfileAvailability data:**")
+            st.write(list(df.columns))
+        
+        # Look for venue/theater columns with broader search
+        venue_cols = [col for col in df.columns if any(word in col.lower() for word in ['venue', 'theater', 'theatre', 'location', 'site', 'place', 'facility', 'hall', 'auditorium', 'center', 'centre'])]
+        
         if venue_cols:
             venue_col = venue_cols[0]
             venues = df[venue_col].dropna().unique()
+            st.write(f"**Found venue column**: {venue_col}")
             selected_venue = st.selectbox("Select Venue/Theater:", venues)
             
             if st.button("🔍 Analyze Availability"):
@@ -314,6 +321,25 @@ elif app_choice == "Account Availability Checker":
                             if venue_data[col].dtype in ['int64', 'float64']:
                                 st.metric(f"Total {col}", venue_data[col].sum())
         else:
-            st.warning("No venue/theater column found in ProfileAvailability data")
+            st.warning("No specific venue/theater column found. Available columns:")
+            st.write(list(df.columns))
+            
+            # Let user manually select a column to analyze
+            if len(df.columns) > 0:
+                selected_col = st.selectbox("Select a column to analyze:", df.columns)
+                unique_values = df[selected_col].dropna().unique()
+                
+                if len(unique_values) > 0:
+                    selected_value = st.selectbox(f"Select {selected_col}:", unique_values)
+                    
+                    if st.button("🔍 Analyze Data"):
+                        filtered_data = df[df[selected_col] == selected_value]
+                        st.write(f"**Results for {selected_col} = {selected_value}:**")
+                        st.dataframe(filtered_data)
+                        st.metric("Total Records", len(filtered_data))
+                else:
+                    st.warning(f"No data found in column {selected_col}")
+            else:
+                st.error("No columns available for analysis")
     else:
         st.error("ProfileAvailability sheet not found in the data")

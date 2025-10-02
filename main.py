@@ -179,9 +179,11 @@ elif app_choice == "Google Sheets Analytics":
         with st.expander("📋 View Raw Data"):
             st.dataframe(df)
         
-        # Revenue Analysis
-        revenue_cols = [col for col in df.columns if 'revenue' in col.lower() or 'Revenue' in col]
-        cost_cols = [col for col in df.columns if 'cost' in col.lower() or 'Cost' in col]
+        # Revenue Analysis - more flexible column detection
+        revenue_cols = [col for col in df.columns if any(word in col.lower() for word in ['revenue', 'income', 'sales', 'amount', 'total', 'price', 'cost'])]
+        cost_cols = [col for col in df.columns if any(word in col.lower() for word in ['cost', 'expense', 'fee', 'charge'])]
+        
+        st.write(f"**Found potential financial columns**: {revenue_cols + cost_cols}")
         
         if revenue_cols or cost_cols:
             st.subheader("💰 Financial Analysis")
@@ -270,47 +272,113 @@ elif app_choice == "Account Availability Checker":
         st.error("No data available for availability analysis")
         st.stop()
     
-    # Sheet selection
+    # Show available sheets for selection
+    st.subheader("📊 Available Data Sheets")
     sheet_names = list(sheets_data.keys())
-    selected_sheet = st.selectbox("Select data sheet:", sheet_names, key="avail_sheet")
     
-    if selected_sheet and selected_sheet in sheets_data:
-        df = sheets_data[selected_sheet].copy()
-        
-        if df.empty:
-            st.warning("Selected sheet is empty")
-            st.stop()
-        
-        # Theater selection
-        theater_cols = [col for col in df.columns if 'theater' in col.lower() or 'Theater' in col]
-        if theater_cols:
-            theaters = df[theater_cols[0]].unique()
-            selected_theater = st.selectbox("Select Theater:", theaters)
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("**Orders & Financial Data:**")
+        financial_sheets = [name for name in sheet_names if any(word in name.lower() for word in ['order', 'payment', 'stefan'])]
+        for sheet in financial_sheets:
+            st.write(f"• {sheet} ({len(sheets_data[sheet])} rows)")
+    
+    with col2:
+        st.write("**Profile & Availability Data:**")
+        profile_sheets = [name for name in sheet_names if any(word in name.lower() for word in ['profile', 'account', 'availability'])]
+        for sheet in profile_sheets:
+            st.write(f"• {sheet} ({len(sheets_data[sheet])} rows)")
+    
+    # Main analysis section
+    st.subheader("🎯 Analysis Options")
+    
+    analysis_type = st.selectbox(
+        "Choose analysis type:",
+        ["Profile Availability Analysis", "Account Capacity Analysis", "Venue Analysis"]
+    )
+    
+    if analysis_type == "Profile Availability Analysis":
+        if 'ProfileAvailability' in sheets_data:
+            df = sheets_data['ProfileAvailability'].copy()
+            st.write(f"**Analyzing ProfileAvailability data** ({len(df)} records)")
             
-            if st.button("🔍 Analyze Availability"):
-                theater_data = df[df[theater_cols[0]] == selected_theater]
+            # Show column structure
+            with st.expander("📋 Data Structure"):
+                st.write("**Columns available:**", list(df.columns))
+                st.dataframe(df.head())
+            
+            # Look for venue/theater columns
+            venue_cols = [col for col in df.columns if any(word in col.lower() for word in ['venue', 'theater', 'theatre', 'location'])]
+            if venue_cols:
+                venue_col = venue_cols[0]
+                venues = df[venue_col].dropna().unique()
+                selected_venue = st.selectbox("Select Venue/Theater:", venues)
                 
-                st.subheader(f"Analysis for {selected_theater}")
-                
-                # Show theater-specific data
-                st.write(f"**Records found**: {len(theater_data)}")
-                
-                if not theater_data.empty:
-                    st.dataframe(theater_data)
+                if st.button("🔍 Analyze Availability"):
+                    venue_data = df[df[venue_col] == selected_venue]
                     
-                    # Email analysis (if email columns exist)
-                    email_cols = [col for col in df.columns if 'email' in col.lower() or 'Email' in col]
-                    if email_cols:
-                        emails = theater_data[email_cols[0]].dropna().unique()
-                        st.write(f"**Unique emails**: {len(emails)}")
+                    st.subheader(f"Results for {selected_venue}")
+                    st.write(f"**Records found**: {len(venue_data)}")
+                    
+                    if not venue_data.empty:
+                        st.dataframe(venue_data)
                         
-                        for email in emails[:10]:  # Show first 10
-                            st.write(f"• {email}")
-                else:
-                    st.warning("No data found for selected theater")
+                        # Look for email columns
+                        email_cols = [col for col in venue_data.columns if 'email' in col.lower()]
+                        if email_cols:
+                            emails = venue_data[email_cols[0]].dropna().unique()
+                            st.write(f"**Available profiles**: {len(emails)}")
+                            for email in emails:
+                                st.write(f"• {email}")
+            else:
+                st.info("No venue/theater column found. Available columns: " + ", ".join(df.columns))
         else:
-            st.info("No theater column found in the data")
-            st.write("Available columns:", list(df.columns))
+            st.warning("ProfileAvailability sheet not found")
+    
+    elif analysis_type == "Account Capacity Analysis":
+        if 'Accounts' in sheets_data:
+            df = sheets_data['Accounts'].copy()
+            st.write(f"**Analyzing Accounts data** ({len(df)} records)")
+            
+            with st.expander("📋 Data Structure"):
+                st.write("**Columns available:**", list(df.columns))
+                st.dataframe(df.head())
+            
+            # Theater/venue analysis
+            theater_cols = [col for col in df.columns if any(word in col.lower() for word in ['theater', 'venue', 'location'])]
+            if theater_cols:
+                theater_col = theater_cols[0]
+                theaters = df[theater_col].dropna().unique()
+                selected_theater = st.selectbox("Select Theater:", theaters)
+                
+                if st.button("🔍 Analyze Capacity"):
+                    theater_data = df[df[theater_col] == selected_theater]
+                    
+                    st.subheader(f"Capacity Analysis for {selected_theater}")
+                    st.write(f"**Accounts at this theater**: {len(theater_data)}")
+                    
+                    if not theater_data.empty:
+                        st.dataframe(theater_data)
+            else:
+                st.info("No theater column found. Available columns: " + ", ".join(df.columns))
+        else:
+            st.warning("Accounts sheet not found")
+    
+    elif analysis_type == "Venue Analysis":
+        if 'Venues' in sheets_data:
+            df = sheets_data['Venues'].copy()
+            st.write(f"**Analyzing Venues data** ({len(df)} records)")
+            
+            with st.expander("📋 Data Structure"):
+                st.write("**Columns available:**", list(df.columns))
+                st.dataframe(df.head())
+            
+            # Show all venues
+            st.subheader("📍 All Venues")
+            st.dataframe(df)
+        else:
+            st.warning("Venues sheet not found")
 
 # Footer
 st.markdown("---")

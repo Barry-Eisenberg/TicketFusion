@@ -3,7 +3,8 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 import plotly.express as px
-import plotly.graph_objects as go
+import plotly.grap            # Advanced details in collapsible section
+            with st.expander("🔍 View Detailed Sheet Information"):objects as go
 from datetime import datetime, timedelta
 import re
 
@@ -201,6 +202,9 @@ if app_choice == "Home":
         st.error(f"Error in data status section: {str(e)}")
         st.write("Sheets loaded:", list(sheets_data.keys()) if sheets_data else "None")
     
+    # Debug checkpoint
+    st.write("🔧 Debug: Reached end of data status section")
+    
     # Show sample data
     try:
         if sheets_data:
@@ -220,6 +224,9 @@ if app_choice == "Home":
     
     except Exception as e:
         st.error(f"Error in sample data section: {str(e)}")
+    
+    # Final debug checkpoint
+    st.write("🔧 Debug: Completed Home page render")
 
 elif app_choice == "Google Sheets Analytics":
     st.header("📈 Analytics Dashboard")

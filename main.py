@@ -295,86 +295,109 @@ elif app_choice == "Account Availability Checker":
         with st.expander("📋 View Data Structure"):
             st.write("**Sample data (first 3 rows):**")
             st.dataframe(df.head(3))
-            st.write("**Column info:**")
+            st.write("**All columns:**")
             for i, col in enumerate(df.columns):
                 st.write(f"{i}: {col}")
         
-        # Availability Analysis Section
-        st.subheader("🎯 Capacity Analysis")
+        # Theater-Based Availability Analysis
+        st.subheader("� Theater Capacity Analysis")
         
         if len(df.columns) > 0:
-            # The first column typically contains email addresses/profiles
-            primary_col = df.columns[0]
+            # First, find theater/venue column
+            theater_cols = []
+            for col in df.columns:
+                col_name = str(col).lower()
+                if any(word in col_name for word in ['theater', 'theatre', 'venue', 'location', 'site', 'hall']):
+                    theater_cols.append(col)
             
-            # Look for capacity-related columns (numeric data that might indicate available spots)
-            capacity_cols = []
-            for col in df.columns[1:]:  # Skip the first column (email)
-                # Check if column contains numeric data that could represent capacity
-                try:
-                    # Convert to numeric and check if it has meaningful values
-                    numeric_data = pd.to_numeric(df[col], errors='coerce')
-                    if numeric_data.notna().any() and (numeric_data > 0).any():
-                        capacity_cols.append(col)
-                except:
-                    pass
+            # If no theater column found by name, let user select
+            if not theater_cols:
+                st.info("No theater column auto-detected. Please select the column that contains theater/venue information:")
+                theater_col = st.selectbox("Select Theater/Venue Column:", df.columns)
+            else:
+                theater_col = theater_cols[0]
+                st.write(f"**Using theater column**: {theater_col}")
             
-            st.write(f"**Found {len(capacity_cols)} potential capacity columns**")
+            # Get unique theaters
+            unique_theaters = df[theater_col].dropna().unique()
             
-            if capacity_cols:
-                # Allow user to select which columns represent capacity/availability
-                selected_capacity_cols = st.multiselect(
-                    "Select columns that represent available capacity/spots:",
-                    capacity_cols,
-                    default=capacity_cols[:3] if len(capacity_cols) >= 3 else capacity_cols
-                )
+            if len(unique_theaters) > 0:
+                selected_theater = st.selectbox("Select Theater:", unique_theaters)
                 
-                if selected_capacity_cols:
-                    # Set minimum capacity threshold
-                    min_capacity = st.number_input("Minimum available capacity threshold:", min_value=0, value=1)
+                # Email column (typically first column)
+                email_col = df.columns[0]
+                st.write(f"**Using email column**: {email_col}")
+                
+                if st.button("🔍 Find Available Profiles for Theater"):
+                    st.subheader(f"📧 Available Profiles for {selected_theater}")
                     
-                    if st.button("🔍 Find Available Profiles"):
-                        st.subheader("📧 Profiles with Available Capacity")
+                    # Filter data for selected theater
+                    theater_data = df[df[theater_col] == selected_theater].copy()
+                    
+                    if not theater_data.empty:
+                        st.write(f"Found {len(theater_data)} profiles for {selected_theater}")
                         
+                        # Apply capacity rules
                         available_profiles = []
                         
-                        for idx, row in df.iterrows():
-                            profile_email = row[primary_col]
-                            if pd.isna(profile_email) or str(profile_email).strip() == "":
+                        for idx, row in theater_data.iterrows():
+                            email = row[email_col]
+                            if pd.isna(email) or str(email).strip() == "":
                                 continue
-                                
-                            # Check if this profile has capacity in any of the selected columns
-                            has_capacity = False
-                            capacity_details = {}
                             
-                            for cap_col in selected_capacity_cols:
+                            # Check capacity based on business rules
+                            has_capacity = False
+                            capacity_info = {}
+                            
+                            # Look through all numeric columns for capacity indicators
+                            for col in theater_data.columns:
+                                if col in [email_col, theater_col]:
+                                    continue
+                                    
                                 try:
-                                    capacity_value = pd.to_numeric(row[cap_col], errors='coerce')
-                                    if pd.notna(capacity_value) and capacity_value >= min_capacity:
-                                        has_capacity = True
-                                        capacity_details[cap_col] = capacity_value
+                                    value = pd.to_numeric(row[col], errors='coerce')
+                                    if pd.notna(value):
+                                        # Business rule: Any positive numeric value indicates available capacity
+                                        if value > 0:
+                                            has_capacity = True
+                                            capacity_info[col] = value
                                 except:
-                                    pass
+                                    # Check for text indicators of availability
+                                    text_value = str(row[col]).strip().lower()
+                                    if text_value in ['available', 'yes', 'open', 'active', '1', 'true']:
+                                        has_capacity = True
+                                        capacity_info[col] = text_value
                             
                             if has_capacity:
                                 available_profiles.append({
-                                    'Email': profile_email,
-                                    'Total_Capacity': sum(capacity_details.values()),
-                                    'Details': capacity_details
+                                    'Email': email,
+                                    'Theater': selected_theater,
+                                    'Capacity_Details': capacity_info,
+                                    'Total_Numeric_Capacity': sum([v for v in capacity_info.values() if isinstance(v, (int, float))])
                                 })
                         
                         if available_profiles:
-                            st.success(f"✅ Found {len(available_profiles)} profiles with available capacity!")
+                            st.success(f"✅ Found {len(available_profiles)} profiles with available capacity at {selected_theater}!")
                             
-                            # Display results
-                            results_df = pd.DataFrame([
-                                {
-                                    'Email': p['Email'],
-                                    'Total Available Capacity': p['Total_Capacity'],
-                                    'Capacity Breakdown': ', '.join([f"{k}: {v}" for k, v in p['Details'].items()])
-                                }
-                                for p in available_profiles
-                            ])
+                            # Display results in a clean format
+                            results_data = []
+                            for profile in available_profiles:
+                                # Create readable capacity summary
+                                capacity_summary = []
+                                for col, val in profile['Capacity_Details'].items():
+                                    if isinstance(val, (int, float)):
+                                        capacity_summary.append(f"{col}: {val}")
+                                    else:
+                                        capacity_summary.append(f"{col}: {val}")
+                                
+                                results_data.append({
+                                    'Email': profile['Email'],
+                                    'Theater': profile['Theater'],
+                                    'Available Capacity': '; '.join(capacity_summary),
+                                    'Total Numeric Capacity': profile['Total_Numeric_Capacity']
+                                })
                             
+                            results_df = pd.DataFrame(results_data)
                             st.dataframe(results_df)
                             
                             # Summary metrics
@@ -382,28 +405,35 @@ elif app_choice == "Account Availability Checker":
                             with col1:
                                 st.metric("Available Profiles", len(available_profiles))
                             with col2:
-                                total_capacity = sum(p['Total_Capacity'] for p in available_profiles)
-                                st.metric("Total Available Capacity", int(total_capacity))
+                                total_capacity = sum(p['Total_Numeric_Capacity'] for p in available_profiles)
+                                st.metric("Total Capacity", int(total_capacity))
                             with col3:
-                                avg_capacity = total_capacity / len(available_profiles) if available_profiles else 0
-                                st.metric("Average Capacity per Profile", f"{avg_capacity:.1f}")
+                                st.metric("Theater", selected_theater)
                             
-                            # Export option
+                            # Email list for easy copying
+                            st.subheader("📋 Email List (Copy & Paste Ready)")
+                            email_list = [p['Email'] for p in available_profiles]
+                            st.text_area("Available Email Addresses:", '\n'.join(email_list), height=200)
+                            
+                            # Download option
                             csv = results_df.to_csv(index=False)
                             st.download_button(
-                                label="📥 Download Results as CSV",
+                                label=f"📥 Download {selected_theater} Results",
                                 data=csv,
-                                file_name="available_profiles.csv",
+                                file_name=f"available_profiles_{selected_theater.replace(' ', '_')}.csv",
                                 mime="text/csv"
                             )
                         else:
-                            st.warning(f"❌ No profiles found with capacity >= {min_capacity}")
-                            st.info("Try adjusting the minimum capacity threshold or check your column selections.")
-                else:
-                    st.warning("Please select at least one capacity column to analyze.")
+                            st.warning(f"❌ No profiles found with available capacity at {selected_theater}")
+                            st.info("Profiles may be at full capacity or data may need review.")
+                            
+                            # Show sample data for debugging
+                            with st.expander("🔍 View Sample Theater Data"):
+                                st.dataframe(theater_data.head())
+                    else:
+                        st.warning(f"No data found for theater: {selected_theater}")
             else:
-                st.error("No numeric columns found that could represent capacity data.")
-                st.info("Make sure your ProfileAvailability data contains numeric columns representing available spots/capacity.")
+                st.error("No theaters found in the selected column.")
         else:
             st.error("No columns available for analysis")
     else:

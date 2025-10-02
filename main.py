@@ -4,7 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import plotly.express as px
 import plotly.grap            # Advanced details in collapsible section
-            with st.expander("🔍 View Detailed Sheet Information"):objects as go
+import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import re
 

@@ -297,41 +297,54 @@ elif app_choice == "Account Availability Checker":
                 sample_vals = df[col].dropna().unique()[:3]
                 st.write(f"{i}: '{col}' → {list(sample_vals)}")
         
-        # Manual column selection
-        st.subheader("📋 Select Columns")
-        theater_col = st.selectbox("Which column contains theater names?", df.columns, key="theater_col")
-        email_col = st.selectbox("Which column contains email addresses?", df.columns, key="email_col")
+        st.info("**Using Column O (index 14) for theaters and Column 0 for emails**")
         
-        # Show theaters
-        theaters = df[theater_col].dropna().unique()
-        st.write(f"**Theaters found:** {list(theaters)}")
-        
-        # Select theater
-        selected_theater = st.selectbox("Select Theater:", theaters)
-        
-        if st.button("Get Email Addresses"):
-            # Get emails for theater
-            theater_data = df[df[theater_col] == selected_theater]
-            emails = theater_data[email_col].dropna().unique()
+        # Column O is the 15th column (index 14: A=0, B=1, C=2... O=14)
+        if len(df.columns) > 14:
+            theater_col = df.columns[14]  # Column O
+            email_col = df.columns[0]     # First column for emails
             
-            st.subheader(f"📧 Email Addresses for {selected_theater}")
-            st.write(f"Found {len(emails)} email addresses:")
+            st.write(f"**Theater Column (O): {theater_col}**")
+            st.write(f"**Email Column: {email_col}**")
             
-            for email in emails:
-                st.write(f"• {email}")
+            # Get unique theaters from Column O
+            theaters = df[theater_col].dropna().unique()
+            theaters = [t for t in theaters if str(t).strip() != ""]  # Remove empty
             
-            # Copy-paste ready
-            st.subheader("📋 Copy-Paste Ready")
-            st.text_area("Copy these emails:", '\n'.join(emails), height=150)
-            
-            # Download CSV
-            email_df = pd.DataFrame({'Email': emails, 'Theater': selected_theater})
-            csv = email_df.to_csv(index=False)
-            st.download_button(
-                label="📥 Download Email List",
-                data=csv,
-                file_name=f"emails_{selected_theater.replace(' ', '_')}.csv",
-                mime="text/csv"
-            )
+            if len(theaters) > 0:
+                st.write(f"**Theaters found:** {list(theaters)}")
+                
+                # Select theater
+                selected_theater = st.selectbox("Select Theater:", theaters)
+                
+                if st.button("Get Email Addresses"):
+                    # Get emails for selected theater
+                    theater_data = df[df[theater_col] == selected_theater]
+                    emails = theater_data[email_col].dropna().unique()
+                    emails = [e for e in emails if str(e).strip() != "" and "@" in str(e)]
+                    
+                    st.subheader(f"📧 Email Addresses for {selected_theater}")
+                    st.write(f"Found {len(emails)} email addresses:")
+                    
+                    for email in emails:
+                        st.write(f"• {email}")
+                    
+                    # Copy-paste ready
+                    st.subheader("📋 Copy-Paste Ready")
+                    st.text_area("Copy these emails:", '\n'.join(emails), height=150)
+                    
+                    # Download CSV
+                    email_df = pd.DataFrame({'Email': emails, 'Theater': selected_theater})
+                    csv = email_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download Email List",
+                        data=csv,
+                        file_name=f"emails_{selected_theater.replace(' ', '_')}.csv",
+                        mime="text/csv"
+                    )
+            else:
+                st.error("No theaters found in Column O")
+        else:
+            st.error("Column O (15th column) not found in data")
     else:
         st.error("ProfileAvailability sheet not found")

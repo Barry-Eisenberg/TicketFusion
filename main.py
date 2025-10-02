@@ -58,9 +58,12 @@ def load_google_sheets_data():
                         
                         # Get all values and create DataFrame manually
                         all_values = worksheet.get_all_values()
-                        if all_values and len(all_values) > 1:
-                            # Use first row as headers, but make them unique and meaningful
-                            headers = all_values[0]
+                        if all_values and len(all_values) > 4:  # Need at least 5 rows (0-3 + header row 4)
+                            # IMPORTANT: Headers are in row 4 (index 3), data starts from row 5 (index 4)
+                            headers = all_values[3]  # Row 4 (0-indexed as 3)
+                            data_rows = all_values[4:]  # Data starts from row 5 (0-indexed as 4)
+                            
+                            # Make headers unique and meaningful
                             unique_headers = []
                             header_counts = {}
                             
@@ -79,10 +82,10 @@ def load_google_sheets_data():
                                 header_counts[header] = True
                                 unique_headers.append(header)
                             
-                            # Create DataFrame with unique headers
-                            df = pd.DataFrame(all_values[1:], columns=unique_headers)
+                            # Create DataFrame with unique headers and correct data
+                            df = pd.DataFrame(data_rows, columns=unique_headers)
                             data[worksheet.title] = df
-                            st.success(f"✅ Loaded '{worksheet.title}': {len(df)} rows (fixed duplicate headers)")
+                            st.success(f"✅ Loaded '{worksheet.title}': {len(df)} rows (fixed duplicate headers, headers from row 4)")
                         else:
                             st.warning(f"⚠️ '{worksheet.title}' appears to be empty")
                     else:

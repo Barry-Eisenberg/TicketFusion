@@ -20,7 +20,15 @@ def load_google_sheets_data():
     try:
         # Get credentials from Streamlit secrets
         credentials_dict = dict(st.secrets["google_service_account"])
-        credentials = Credentials.from_service_account_info(credentials_dict)
+        
+        # Define the required scopes for Google Sheets
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        
+        # Create credentials with proper scopes
+        credentials = Credentials.from_service_account_info(credentials_dict, scopes=scopes)
         
         # Connect to Google Sheets
         gc = gspread.authorize(credentials)

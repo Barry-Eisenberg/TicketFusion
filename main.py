@@ -151,71 +151,75 @@ if app_choice == "Home":
         st.markdown("---")
     
     # Show data status
-    st.subheader("📊 Data Status")
-    if sheets_data:
-        st.success(f"✅ Connected to Google Sheets - {len(sheets_data)} worksheets loaded")
-        
-        # Show detailed info for each sheet with error handling
-        for sheet_name, df in sheets_data.items():
-            try:
-                with st.expander(f"📋 {sheet_name} Details"):
-                    if not df.empty:
-                        st.write(f"**Rows**: {len(df)} | **Columns**: {len(df.columns)}")
+    try:
+        st.subheader("📊 Data Status")
+        if sheets_data:
+            st.success(f"✅ Connected to Google Sheets - {len(sheets_data)} worksheets loaded")
+            
+            # Simple list view first
+            st.write("**Loaded sheets:**")
+            for sheet_name, df in sheets_data.items():
+                st.write(f"• **{sheet_name}**: {len(df)} rows, {len(df.columns)} columns")
+            
+            # Advanced details in collapsible section
+            with st.expander("� View Detailed Sheet Information"):
+                for sheet_name, df in sheets_data.items():
+                    try:
+                        st.write(f"**{sheet_name}**")
                         
-                        # Show column names safely
-                        try:
-                            col_names = list(df.columns)
-                            if len(col_names) > 15:
-                                st.write(f"**Columns**: {', '.join(col_names[:15])}... (and {len(col_names)-15} more)")
+                        if not df.empty and len(df.columns) > 0:
+                            # Show columns safely
+                            col_names = [str(col) for col in df.columns]
+                            if len(col_names) > 10:
+                                st.write(f"Columns: {', '.join(col_names[:10])}... (+{len(col_names)-10} more)")
                             else:
-                                st.write(f"**Columns**: {', '.join(col_names)}")
-                        except Exception:
-                            st.write(f"**Columns**: {len(df.columns)} columns (names not displayable)")
-                        
-                        # Show sample data with careful error handling
-                        try:
+                                st.write(f"Columns: {', '.join(col_names)}")
+                            
+                            # Show one sample row
                             if len(df) > 0:
-                                st.write("**Sample data**:")
-                                # Convert to string to avoid display issues
-                                sample_df = df.head(2).copy()
-                                for col in sample_df.columns:
-                                    sample_df[col] = sample_df[col].astype(str)
-                                st.dataframe(sample_df)
-                        except Exception as e:
-                            st.write(f"*Sample data not displayable: {str(e)}*")
-                    else:
-                        st.write("*No data in this sheet*")
-            except Exception as e:
-                st.warning(f"Error processing {sheet_name}: {str(e)}")
-    else:
-        st.error("❌ No data loaded")
+                                st.write("Sample row:")
+                                try:
+                                    sample_row = df.iloc[0].to_dict()
+                                    # Limit display to first 5 columns to avoid overflow
+                                    sample_display = {k: str(v)[:50] + "..." if len(str(v)) > 50 else str(v) 
+                                                    for k, v in list(sample_row.items())[:5]}
+                                    st.json(sample_display)
+                                except Exception:
+                                    st.write("*Sample data not displayable*")
+                        else:
+                            st.write("*Empty sheet*")
+                        
+                        st.write("---")
+                        
+                    except Exception as e:
+                        st.write(f"Error with {sheet_name}: {str(e)}")
+                        st.write("---")
+        else:
+            st.error("❌ No data loaded")
+    
+    except Exception as e:
+        st.error(f"Error in data status section: {str(e)}")
+        st.write("Sheets loaded:", list(sheets_data.keys()) if sheets_data else "None")
     
     # Show sample data
-    if sheets_data:
-        st.subheader("📋 Sample Data Preview")
-        for sheet_name, df in list(sheets_data.items())[:3]:  # Show first 3 sheets only
-            try:
-                with st.expander(f"View {sheet_name} data"):
-                    if not df.empty:
-                        st.write(f"**Shape**: {df.shape[0]} rows × {df.shape[1]} columns")
-                        st.write(f"**Columns**: {', '.join(list(df.columns)[:10])}{'...' if len(df.columns) > 10 else ''}")
-                        
-                        # Show sample data with error handling
-                        try:
-                            sample_df = df.head(3)
-                            # Clean any problematic data for display
-                            for col in sample_df.columns:
-                                if sample_df[col].dtype == 'object':
-                                    sample_df[col] = sample_df[col].astype(str)
-                            st.dataframe(sample_df)
-                        except Exception as display_error:
-                            st.warning(f"Could not display sample data: {str(display_error)}")
-                            st.write("**Column names only**:", list(df.columns))
-                    else:
-                        st.write("*No data in this sheet*")
-            except Exception as e:
-                st.warning(f"Error displaying {sheet_name}: {str(e)}")
-                continue
+    try:
+        if sheets_data:
+            st.subheader("📋 Quick Start")
+            st.write("Your data is loaded and ready! Use the navigation sidebar to:")
+            st.write("• **Google Sheets Analytics** - View charts and financial analysis")
+            st.write("• **Account Availability Checker** - Analyze profiles and availability")
+            
+            # Show key sheets available
+            key_sheets = ['Orders', 'Accounts', 'ProfileAvailability', 'Venues']
+            available_key_sheets = [sheet for sheet in key_sheets if sheet in sheets_data]
+            
+            if available_key_sheets:
+                st.write(f"**Key data sheets available**: {', '.join(available_key_sheets)}")
+            
+            st.success("✅ All systems ready - select a tab from the sidebar to get started!")
+    
+    except Exception as e:
+        st.error(f"Error in sample data section: {str(e)}")
 
 elif app_choice == "Google Sheets Analytics":
     st.header("📈 Analytics Dashboard")

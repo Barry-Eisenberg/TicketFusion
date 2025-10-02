@@ -59,19 +59,25 @@ def load_google_sheets_data():
                         # Get all values and create DataFrame manually
                         all_values = worksheet.get_all_values()
                         if all_values and len(all_values) > 1:
-                            # Use first row as headers, but make them unique
+                            # Use first row as headers, but make them unique and meaningful
                             headers = all_values[0]
                             unique_headers = []
                             header_counts = {}
                             
-                            for header in headers:
-                                if header in header_counts:
-                                    header_counts[header] += 1
-                                    unique_header = f"{header}_{header_counts[header]}"
-                                else:
-                                    header_counts[header] = 0
-                                    unique_header = header
-                                unique_headers.append(unique_header)
+                            for i, header in enumerate(headers):
+                                # Handle empty headers
+                                if not header or header.strip() == "":
+                                    header = f"Column_{i+1}"
+                                
+                                # Handle duplicate headers
+                                original_header = header
+                                counter = 0
+                                while header in header_counts:
+                                    counter += 1
+                                    header = f"{original_header}_{counter}"
+                                
+                                header_counts[header] = True
+                                unique_headers.append(header)
                             
                             # Create DataFrame with unique headers
                             df = pd.DataFrame(all_values[1:], columns=unique_headers)
@@ -189,6 +195,25 @@ elif app_choice == "Google Sheets Analytics":
         st.write(f"**Rows:** {len(df)}")
         st.write(f"**Columns:** {len(df.columns)}")
         st.write(f"**Column names:** {', '.join(df.columns)}")
+        
+        # Show sample data to help understand the structure
+        if len(df) > 0:
+            st.subheader("📋 Data Preview")
+            
+            # Show first few rows
+            st.write("**First 3 rows:**")
+            st.dataframe(df.head(3))
+            
+            # Show column info
+            with st.expander("🔍 Column Details"):
+                for i, col in enumerate(df.columns):
+                    sample_values = df[col].dropna().head(3).tolist()
+                    st.write(f"**Column {i+1}: {col}**")
+                    if sample_values:
+                        st.write(f"Sample values: {sample_values}")
+                    else:
+                        st.write("Sample values: [No data]")
+                    st.write("---")
 
 elif app_choice == "Account Availability Checker":
     st.header("🔍 Account Availability Analysis")

@@ -289,54 +289,121 @@ elif app_choice == "Account Availability Checker":
     # Automatically use ProfileAvailability data
     if 'ProfileAvailability' in sheets_data:
         df = sheets_data['ProfileAvailability'].copy()
-        st.write(f"**Profile Availability Data** ({len(df)} records)")
+        st.write(f"**Profile Availability Analysis** ({len(df)} records)")
         
-        # Show available columns for debugging
-        with st.expander("📋 View Available Columns and Sample Data"):
-            st.write("**Columns in ProfileAvailability data:**")
-            for i, col in enumerate(df.columns):
-                st.write(f"{i}: {col}")
-            
+        # Show data structure for understanding
+        with st.expander("📋 View Data Structure"):
             st.write("**Sample data (first 3 rows):**")
             st.dataframe(df.head(3))
+            st.write("**Column info:**")
+            for i, col in enumerate(df.columns):
+                st.write(f"{i}: {col}")
         
-        # Since columns are showing as generic names, let's look at the actual data
-        # The first column appears to contain email addresses
+        # Availability Analysis Section
+        st.subheader("🎯 Capacity Analysis")
+        
         if len(df.columns) > 0:
-            # Use the first column as the primary identifier (likely email/account)
+            # The first column typically contains email addresses/profiles
             primary_col = df.columns[0]
-            st.write(f"**Using primary column**: {primary_col}")
             
-            # Get unique values from the first column
-            unique_values = df[primary_col].dropna().unique()
+            # Look for capacity-related columns (numeric data that might indicate available spots)
+            capacity_cols = []
+            for col in df.columns[1:]:  # Skip the first column (email)
+                # Check if column contains numeric data that could represent capacity
+                try:
+                    # Convert to numeric and check if it has meaningful values
+                    numeric_data = pd.to_numeric(df[col], errors='coerce')
+                    if numeric_data.notna().any() and (numeric_data > 0).any():
+                        capacity_cols.append(col)
+                except:
+                    pass
             
-            if len(unique_values) > 0:
-                st.write(f"**Found {len(unique_values)} unique accounts/profiles**")
-                selected_account = st.selectbox("Select Account/Profile:", unique_values[:20])  # Limit to first 20 for performance
+            st.write(f"**Found {len(capacity_cols)} potential capacity columns**")
+            
+            if capacity_cols:
+                # Allow user to select which columns represent capacity/availability
+                selected_capacity_cols = st.multiselect(
+                    "Select columns that represent available capacity/spots:",
+                    capacity_cols,
+                    default=capacity_cols[:3] if len(capacity_cols) >= 3 else capacity_cols
+                )
                 
-                if st.button("🔍 Analyze Profile Availability"):
-                    profile_data = df[df[primary_col] == selected_account]
-                    st.write(f"**Results for {selected_account}:**")
-                    st.dataframe(profile_data)
+                if selected_capacity_cols:
+                    # Set minimum capacity threshold
+                    min_capacity = st.number_input("Minimum available capacity threshold:", min_value=0, value=1)
                     
-                    # Basic stats
-                    if not profile_data.empty:
-                        st.metric("Total Records", len(profile_data))
+                    if st.button("🔍 Find Available Profiles"):
+                        st.subheader("📧 Profiles with Available Capacity")
                         
-                        # Show non-empty columns for this profile
-                        non_empty_cols = []
-                        for col in profile_data.columns:
-                            if profile_data[col].notna().any() and profile_data[col].astype(str).str.strip().ne('').any():
-                                non_empty_cols.append(col)
+                        available_profiles = []
                         
-                        if non_empty_cols:
-                            st.write(f"**Columns with data**: {len(non_empty_cols)}")
-                            for col in non_empty_cols[:10]:  # Show first 10
-                                unique_vals = profile_data[col].dropna().unique()
-                                if len(unique_vals) <= 5:  # Only show if few unique values
-                                    st.write(f"• {col}: {', '.join(map(str, unique_vals))}")
+                        for idx, row in df.iterrows():
+                            profile_email = row[primary_col]
+                            if pd.isna(profile_email) or str(profile_email).strip() == "":
+                                continue
+                                
+                            # Check if this profile has capacity in any of the selected columns
+                            has_capacity = False
+                            capacity_details = {}
+                            
+                            for cap_col in selected_capacity_cols:
+                                try:
+                                    capacity_value = pd.to_numeric(row[cap_col], errors='coerce')
+                                    if pd.notna(capacity_value) and capacity_value >= min_capacity:
+                                        has_capacity = True
+                                        capacity_details[cap_col] = capacity_value
+                                except:
+                                    pass
+                            
+                            if has_capacity:
+                                available_profiles.append({
+                                    'Email': profile_email,
+                                    'Total_Capacity': sum(capacity_details.values()),
+                                    'Details': capacity_details
+                                })
+                        
+                        if available_profiles:
+                            st.success(f"✅ Found {len(available_profiles)} profiles with available capacity!")
+                            
+                            # Display results
+                            results_df = pd.DataFrame([
+                                {
+                                    'Email': p['Email'],
+                                    'Total Available Capacity': p['Total_Capacity'],
+                                    'Capacity Breakdown': ', '.join([f"{k}: {v}" for k, v in p['Details'].items()])
+                                }
+                                for p in available_profiles
+                            ])
+                            
+                            st.dataframe(results_df)
+                            
+                            # Summary metrics
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Available Profiles", len(available_profiles))
+                            with col2:
+                                total_capacity = sum(p['Total_Capacity'] for p in available_profiles)
+                                st.metric("Total Available Capacity", int(total_capacity))
+                            with col3:
+                                avg_capacity = total_capacity / len(available_profiles) if available_profiles else 0
+                                st.metric("Average Capacity per Profile", f"{avg_capacity:.1f}")
+                            
+                            # Export option
+                            csv = results_df.to_csv(index=False)
+                            st.download_button(
+                                label="📥 Download Results as CSV",
+                                data=csv,
+                                file_name="available_profiles.csv",
+                                mime="text/csv"
+                            )
+                        else:
+                            st.warning(f"❌ No profiles found with capacity >= {min_capacity}")
+                            st.info("Try adjusting the minimum capacity threshold or check your column selections.")
+                else:
+                    st.warning("Please select at least one capacity column to analyze.")
             else:
-                st.warning("No data found in the primary column")
+                st.error("No numeric columns found that could represent capacity data.")
+                st.info("Make sure your ProfileAvailability data contains numeric columns representing available spots/capacity.")
         else:
             st.error("No columns available for analysis")
     else:

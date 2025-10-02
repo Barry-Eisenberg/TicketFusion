@@ -55,41 +55,44 @@ def load_google_sheets_data():
                 except Exception as header_error:
                     # If header issue, try alternative method
                     if "header row" in str(header_error).lower() and "not unique" in str(header_error).lower():
-                        st.warning(f"⚠️ '{worksheet.title}' has duplicate headers, using alternative loading method...")
-                        
-                        # Get all values and create DataFrame manually
-                        all_values = worksheet.get_all_values()
-                        if all_values and len(all_values) > 4:  # Need at least 5 rows (0-3 + header row 4)
-                            # IMPORTANT: Headers are in row 4 (index 3), data starts from row 5 (index 4)
-                            headers = all_values[3]  # Row 4 (0-indexed as 3)
-                            data_rows = all_values[4:]  # Data starts from row 5 (0-indexed as 4)
+                        try:
+                            # st.warning(f"⚠️ '{worksheet.title}' has duplicate headers, using alternative loading method...")
                             
-                            # Make headers unique and meaningful
-                            unique_headers = []
-                            header_counts = {}
-                            
-                            for i, header in enumerate(headers):
-                                # Handle empty headers
-                                if not header or header.strip() == "":
-                                    header = f"Column_{i+1}"
+                            # Get all values and create DataFrame manually
+                            all_values = worksheet.get_all_values()
+                            if all_values and len(all_values) > 4:  # Need at least 5 rows (0-3 + header row 4)
+                                # IMPORTANT: Headers are in row 4 (index 3), data starts from row 5 (index 4)
+                                headers = all_values[3]  # Row 4 (0-indexed as 3)
+                                data_rows = all_values[4:]  # Data starts from row 5 (0-indexed as 4)
                                 
-                                # Handle duplicate headers
-                                original_header = header
-                                counter = 0
-                                while header in header_counts:
-                                    counter += 1
-                                    header = f"{original_header}_{counter}"
+                                # Make headers unique and meaningful
+                                unique_headers = []
+                                header_counts = {}
                                 
-                                header_counts[header] = True
-                                unique_headers.append(header)
-                            
-                            # Create DataFrame with unique headers and correct data
-                            df = pd.DataFrame(data_rows, columns=unique_headers)
-                            data[worksheet.title] = df
-                            # Only show detailed success in debug mode  
-                            # st.success(f"✅ Loaded '{worksheet.title}': {len(df)} rows (fixed duplicate headers, headers from row 4)")
-                        else:
-                            st.warning(f"⚠️ '{worksheet.title}' appears to be empty")
+                                for i, header in enumerate(headers):
+                                    # Handle empty headers
+                                    if not header or header.strip() == "":
+                                        header = f"Column_{i+1}"
+                                    
+                                    # Handle duplicate headers
+                                    original_header = header
+                                    counter = 0
+                                    while header in header_counts:
+                                        counter += 1
+                                        header = f"{original_header}_{counter}"
+                                    
+                                    header_counts[header] = True
+                                    unique_headers.append(header)
+                                
+                                # Create DataFrame with unique headers and correct data
+                                df = pd.DataFrame(data_rows, columns=unique_headers)
+                                data[worksheet.title] = df
+                                # Only show detailed success in debug mode  
+                                # st.success(f"✅ Loaded '{worksheet.title}': {len(df)} rows (fixed duplicate headers, headers from row 4)")
+                            else:
+                                st.warning(f"⚠️ '{worksheet.title}' appears to be empty")
+                        except Exception as fallback_error:
+                            st.error(f"❌ Failed to load '{worksheet.title}': {fallback_error}")
                     else:
                         raise header_error
                         
@@ -179,28 +182,22 @@ elif app_choice == "Google Sheets Analytics":
         st.error("No data available for analytics")
         st.stop()
     
-    # Sheet selection
-    sheet_names = list(sheets_data.keys())
-    selected_sheet = st.selectbox("Select data sheet:", sheet_names)
+    # Automatically use Orders data for analytics
+    if 'Orders' in sheets_data:
+        df = sheets_data['Orders'].copy()
+    else:
+        # Fallback to first available sheet
+        df = list(sheets_data.values())[0].copy()
     
-    if selected_sheet and selected_sheet in sheets_data:
-        df = sheets_data[selected_sheet].copy()
-        
-        if df.empty:
-            st.warning("Selected sheet is empty")
-            st.stop()
-        
-        st.subheader(f"Data from: {selected_sheet}")
-        
-        # Show raw data
-        with st.expander("📋 View Raw Data"):
-            st.dataframe(df)
+    if df.empty:
+        st.warning("No order data available for analytics")
+        st.stop()
         
         # Revenue Analysis - more flexible column detection
         revenue_cols = [col for col in df.columns if any(word in col.lower() for word in ['revenue', 'income', 'sales', 'amount', 'total', 'price', 'cost'])]
         cost_cols = [col for col in df.columns if any(word in col.lower() for word in ['cost', 'expense', 'fee', 'charge'])]
         
-        st.write(f"**Found potential financial columns**: {revenue_cols + cost_cols}")
+        # st.write(f"**Found potential financial columns**: {revenue_cols + cost_cols}")
         
         if revenue_cols or cost_cols:
             st.subheader("💰 Financial Analysis")
@@ -283,116 +280,40 @@ elif app_choice == "Google Sheets Analytics":
             st.write("Available columns:", list(df.columns))
 
 elif app_choice == "Account Availability Checker":
-    st.header("🔍 Account Availability Analysis")
+    st.header("🎫 Account Availability Checker")
     
     if not sheets_data:
-        st.error("No data available for availability analysis")
+        st.error("No data available for availability checking")
         st.stop()
     
-    # Show available sheets for selection
-    st.subheader("📊 Available Data Sheets")
-    sheet_names = list(sheets_data.keys())
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.write("**Orders & Financial Data:**")
-        financial_sheets = [name for name in sheet_names if any(word in name.lower() for word in ['order', 'payment', 'stefan'])]
-        for sheet in financial_sheets:
-            st.write(f"• {sheet} ({len(sheets_data[sheet])} rows)")
-    
-    with col2:
-        st.write("**Profile & Availability Data:**")
-        profile_sheets = [name for name in sheet_names if any(word in name.lower() for word in ['profile', 'account', 'availability'])]
-        for sheet in profile_sheets:
-            st.write(f"• {sheet} ({len(sheets_data[sheet])} rows)")
-    
-    # Main analysis section
-    st.subheader("🎯 Analysis Options")
-    
-    analysis_type = st.selectbox(
-        "Choose analysis type:",
-        ["Profile Availability Analysis", "Account Capacity Analysis", "Venue Analysis"]
-    )
-    
-    if analysis_type == "Profile Availability Analysis":
-        if 'ProfileAvailability' in sheets_data:
-            df = sheets_data['ProfileAvailability'].copy()
-            st.write(f"**Analyzing ProfileAvailability data** ({len(df)} records)")
+    # Automatically use ProfileAvailability data
+    if 'ProfileAvailability' in sheets_data:
+        df = sheets_data['ProfileAvailability'].copy()
+        st.write(f"**Profile Availability Data** ({len(df)} records)")
+        
+        # Look for venue/theater columns
+        venue_cols = [col for col in df.columns if any(word in col.lower() for word in ['venue', 'theater', 'theatre', 'location'])]
+        if venue_cols:
+            venue_col = venue_cols[0]
+            venues = df[venue_col].dropna().unique()
+            selected_venue = st.selectbox("Select Venue/Theater:", venues)
             
-            # Show column structure
-            with st.expander("📋 Data Structure"):
-                st.write("**Columns available:**", list(df.columns))
-                st.dataframe(df.head())
-            
-            # Look for venue/theater columns
-            venue_cols = [col for col in df.columns if any(word in col.lower() for word in ['venue', 'theater', 'theatre', 'location'])]
-            if venue_cols:
-                venue_col = venue_cols[0]
-                venues = df[venue_col].dropna().unique()
-                selected_venue = st.selectbox("Select Venue/Theater:", venues)
+            if st.button("🔍 Analyze Availability"):
+                venue_data = df[df[venue_col] == selected_venue]
+                st.write(f"**Results for {selected_venue}:**")
+                st.dataframe(venue_data)
                 
-                if st.button("🔍 Analyze Availability"):
-                    venue_data = df[df[venue_col] == selected_venue]
+                # Basic stats
+                if not venue_data.empty:
+                    st.metric("Total Records", len(venue_data))
                     
-                    st.subheader(f"Results for {selected_venue}")
-                    st.write(f"**Records found**: {len(venue_data)}")
-                    
-                    if not venue_data.empty:
-                        st.dataframe(venue_data)
-                        
-                        # Look for email columns
-                        email_cols = [col for col in venue_data.columns if 'email' in col.lower()]
-                        if email_cols:
-                            emails = venue_data[email_cols[0]].dropna().unique()
-                            st.write(f"**Available profiles**: {len(emails)}")
-                            for email in emails:
-                                st.write(f"• {email}")
-            else:
-                st.info("No venue/theater column found. Available columns: " + ", ".join(df.columns))
+                    # Look for availability indicators
+                    availability_cols = [col for col in venue_data.columns if any(word in col.lower() for word in ['available', 'capacity', 'status'])]
+                    if availability_cols:
+                        for col in availability_cols:
+                            if venue_data[col].dtype in ['int64', 'float64']:
+                                st.metric(f"Total {col}", venue_data[col].sum())
         else:
-            st.warning("ProfileAvailability sheet not found")
-    
-    elif analysis_type == "Account Capacity Analysis":
-        if 'Accounts' in sheets_data:
-            df = sheets_data['Accounts'].copy()
-            st.write(f"**Analyzing Accounts data** ({len(df)} records)")
-            
-            with st.expander("📋 Data Structure"):
-                st.write("**Columns available:**", list(df.columns))
-                st.dataframe(df.head())
-            
-            # Theater/venue analysis
-            theater_cols = [col for col in df.columns if any(word in col.lower() for word in ['theater', 'venue', 'location'])]
-            if theater_cols:
-                theater_col = theater_cols[0]
-                theaters = df[theater_col].dropna().unique()
-                selected_theater = st.selectbox("Select Theater:", theaters)
-                
-                if st.button("🔍 Analyze Capacity"):
-                    theater_data = df[df[theater_col] == selected_theater]
-                    
-                    st.subheader(f"Capacity Analysis for {selected_theater}")
-                    st.write(f"**Accounts at this theater**: {len(theater_data)}")
-                    
-                    if not theater_data.empty:
-                        st.dataframe(theater_data)
-            else:
-                st.info("No theater column found. Available columns: " + ", ".join(df.columns))
-        else:
-            st.warning("Accounts sheet not found")
-    
-    elif analysis_type == "Venue Analysis":
-        if 'Venues' in sheets_data:
-            df = sheets_data['Venues'].copy()
-            st.write(f"**Analyzing Venues data** ({len(df)} records)")
-            
-            with st.expander("📋 Data Structure"):
-                st.write("**Columns available:**", list(df.columns))
-                st.dataframe(df.head())
-            
-            # Show all venues
-            st.subheader("📍 All Venues")
-            st.dataframe(df)
-        else:
-            st.warning("Venues sheet not found")
+            st.warning("No venue/theater column found in ProfileAvailability data")
+    else:
+        st.error("ProfileAvailability sheet not found in the data")

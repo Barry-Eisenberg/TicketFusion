@@ -56,18 +56,17 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
 def load_google_sheets_data():
     """Load data from Google Sheets with proper error handling"""
     try:
-        # Try to get credentials from Streamlit secrets, fallback to direct file read
-        doc_id = None
-        try:
-            credentials_dict = dict(st.secrets["google_service_account"])
-            doc_id = st.secrets["GOOGLE_SHEETS_DOC_ID"]
-        except Exception:
-            # Fallback: read directly from the ready file
-            import toml
-            with open("STREAMLIT_SECRETS_READY.toml", "r") as f:
-                secrets = toml.load(f)
-                credentials_dict = dict(secrets["google_service_account"])
-                doc_id = secrets["GOOGLE_SHEETS_DOC_ID"]
+        # Get credentials from Streamlit secrets
+        if "google_service_account" not in st.secrets:
+            st.error("Google service account credentials not found in secrets. Please configure them in Streamlit Cloud.")
+            return None
+            
+        if "GOOGLE_SHEETS_DOC_ID" not in st.secrets:
+            st.error("Google Sheets document ID not found in secrets. Please configure GOOGLE_SHEETS_DOC_ID in Streamlit Cloud.")
+            return None
+            
+        credentials_dict = dict(st.secrets["google_service_account"])
+        doc_id = st.secrets["GOOGLE_SHEETS_DOC_ID"]
         
         # Define the required scopes for Google Sheets
         scopes = [

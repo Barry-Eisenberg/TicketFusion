@@ -99,11 +99,34 @@ def load_google_sheets_data():
                 if values:
                     # First row as headers
                     headers = values[0]
+                    
+                    # Clean up headers: remove empty strings and handle duplicates
+                    cleaned_headers = []
+                    header_counts = {}
+                    
+                    for i, header in enumerate(headers):
+                        # Replace empty headers with generic names
+                        if not header or header.strip() == "":
+                            header = f"Column_{i+1}"
+                        else:
+                            header = header.strip()
+                        
+                        # Handle duplicate headers by adding suffix
+                        if header in header_counts:
+                            header_counts[header] += 1
+                            header = f"{header}_{header_counts[header]}"
+                        else:
+                            header_counts[header] = 0
+                        
+                        cleaned_headers.append(header)
+                    
                     if len(values) > 1:
-                        df = pd.DataFrame(values[1:], columns=headers)
+                        df = pd.DataFrame(values[1:], columns=cleaned_headers)
+                        # Remove completely empty columns
+                        df = df.loc[:, (df != '').any(axis=0)]
                         data[worksheet.title] = df
                     else:
-                        data[worksheet.title] = pd.DataFrame(columns=headers)
+                        data[worksheet.title] = pd.DataFrame(columns=cleaned_headers)
                 else:
                     data[worksheet.title] = pd.DataFrame()
             except Exception as e:
@@ -146,8 +169,17 @@ def main():
             for sheet_name, df in sheets_data.items():
                 with st.expander(f"📋 {sheet_name} ({len(df)} rows)"):
                     if not df.empty:
-                        st.dataframe(df.head(10))
-                        st.write(f"Columns: {', '.join(df.columns)}")
+                        try:
+                            # Display first 10 rows with error handling
+                            display_df = df.head(10)
+                            # Reset index to avoid any index-related issues
+                            display_df = display_df.reset_index(drop=True)
+                            st.dataframe(display_df, use_container_width=True)
+                            st.write(f"Columns: {', '.join(df.columns)}")
+                        except Exception as e:
+                            st.error(f"Error displaying data for {sheet_name}: {e}")
+                            st.write(f"Sheet has {len(df)} rows and {len(df.columns)} columns")
+                            st.write(f"Columns: {', '.join(df.columns)}")
                     else:
                         st.info("No data available")
     

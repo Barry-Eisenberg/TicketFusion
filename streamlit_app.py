@@ -18,8 +18,25 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
     """
     Simplified availability checker without database dependencies
     """
+    # Check if orders DataFrame is valid and has required columns
+    if orders is None or orders.empty:
+        return True, ["No order data available"]
+    
+    # Check for email column - try different possible names
+    email_col = None
+    for col in ['email', 'Email', 'EMAIL', 'Email Address', 'email_address']:
+        if col in orders.columns:
+            email_col = col
+            break
+    
+    if email_col is None:
+        return True, ["Email column not found in order data"]
+    
     # Filter orders for this email
-    user_orders = orders[orders['email'].str.lower().str.strip() == email.lower().strip()]
+    try:
+        user_orders = orders[orders[email_col].astype(str).str.lower().str.strip() == email.lower().strip()]
+    except Exception:
+        return True, ["Error filtering orders by email"]
     
     if user_orders.empty:
         return True, []
@@ -27,26 +44,69 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
     reasons = []
     
     # Rule 1: No orders in the last 12 months
-    if 'sold_date' in user_orders.columns:
-        twelve_months_ago = today - timedelta(days=365)
-        recent_orders = user_orders[user_orders['sold_date'] >= twelve_months_ago]
-        if not recent_orders.empty:
-            reasons.append("Has orders within last 12 months")
+    sold_date_cols = ['sold_date', 'Sold Date', 'SOLD_DATE', 'sold_date_new']
+    sold_col = None
+    for col in sold_date_cols:
+        if col in user_orders.columns:
+            sold_col = col
+            break
+    
+    if sold_col:
+        try:
+            twelve_months_ago = today - timedelta(days=365)
+            # Convert to datetime if not already
+            dates = pd.to_datetime(user_orders[sold_col], errors='coerce')
+            recent_orders = dates[dates >= twelve_months_ago]
+            if not recent_orders.empty:
+                reasons.append("Has orders within last 12 months")
+        except Exception:
+            pass  # Skip this rule if date conversion fails
     
     # Rule 2: No orders for the same event (if event specified)
-    if event and 'event' in user_orders.columns:
-        same_event_orders = user_orders[user_orders['event'].str.strip() == event.strip()]
-        if not same_event_orders.empty:
-            reasons.append(f"Already has orders for event: {event}")
+    if event:
+        event_cols = ['event', 'Event', 'EVENT', 'Event Name']
+        event_col = None
+        for col in event_cols:
+            if col in user_orders.columns:
+                event_col = col
+                break
+        
+        if event_col:
+            try:
+                same_event_orders = user_orders[user_orders[event_col].astype(str).str.strip() == event.strip()]
+                if not same_event_orders.empty:
+                    reasons.append(f"Already has orders for event: {event}")
+            except Exception:
+                pass  # Skip this rule if comparison fails
     
     # Rule 3: No multiple purchases for same (Event + Theater) on different dates
-    if event and theater and 'event' in user_orders.columns and 'theater' in user_orders.columns:
-        same_event_theater = user_orders[
-            (user_orders['event'].str.strip() == event.strip()) &
-            (user_orders['theater'].str.strip() == theater.strip())
-        ]
-        if len(same_event_theater) > 0:
-            reasons.append(f"Already has orders for {event} at {theater}")
+    if event and theater:
+        event_cols = ['event', 'Event', 'EVENT', 'Event Name']
+        theater_cols = ['theater', 'Theater', 'THEATER', 'Venue', 'venue']
+        
+        event_col = None
+        theater_col = None
+        
+        for col in event_cols:
+            if col in user_orders.columns:
+                event_col = col
+                break
+        
+        for col in theater_cols:
+            if col in user_orders.columns:
+                theater_col = col
+                break
+        
+        if event_col and theater_col:
+            try:
+                same_event_theater = user_orders[
+                    (user_orders[event_col].astype(str).str.strip() == event.strip()) &
+                    (user_orders[theater_col].astype(str).str.strip() == theater.strip())
+                ]
+                if len(same_event_theater) > 0:
+                    reasons.append(f"Already has orders for {event} at {theater}")
+            except Exception:
+                pass  # Skip this rule if comparison fails
     
     # If any rules failed, not available
     is_available = len(reasons) == 0
@@ -161,11 +221,13 @@ def main():
         """)
         
     elif app_choice == "Data Overview":
-        st.header("📊 Data Overview")
+        st.header("📊 Data Overview & Analytics")
         
         # Load data
         sheets_data = load_google_sheets_data()
         if sheets_data:
+            # First show raw data in expandable sections
+            st.subheader("📋 Raw Data")
             for sheet_name, df in sheets_data.items():
                 with st.expander(f"📋 {sheet_name} ({len(df)} rows)"):
                     if not df.empty:
@@ -182,30 +244,136 @@ def main():
                             st.write(f"Columns: {', '.join(df.columns)}")
                     else:
                         st.info("No data available")
+            
+            # Add analytics if Orders data is available
+            if 'Orders' in sheets_data and not sheets_data['Orders'].empty:
+                st.subheader("📈 Analytics")
+                orders_df = sheets_data['Orders'].copy()
+                
+                # Try to find date and venue columns
+                date_cols = ['Sold Date', 'sold_date', 'Date', 'Event Date', 'event_date']
+                venue_cols = ['Theater', 'theater', 'Venue', 'venue']
+                event_cols = ['Event', 'event', 'Event Name', 'event_name']
+                
+                date_col = None
+                venue_col = None
+                event_col = None
+                
+                for col in date_cols:
+                    if col in orders_df.columns:
+                        date_col = col
+                        break
+                
+                for col in venue_cols:
+                    if col in orders_df.columns:
+                        venue_col = col
+                        break
+                        
+                for col in event_cols:
+                    if col in orders_df.columns:
+                        event_col = col
+                        break
+                
+                # Show basic metrics
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Orders", len(orders_df))
+                with col2:
+                    if venue_col:
+                        unique_venues = orders_df[venue_col].nunique()
+                        st.metric("Unique Venues", unique_venues)
+                    else:
+                        st.metric("Venues", "N/A")
+                with col3:
+                    if event_col:
+                        unique_events = orders_df[event_col].nunique()
+                        st.metric("Unique Events", unique_events)
+                    else:
+                        st.metric("Events", "N/A")
+                
+                # Charts if we have the right columns
+                if venue_col:
+                    st.subheader("Orders by Venue")
+                    try:
+                        venue_counts = orders_df[venue_col].value_counts().head(10)
+                        if not venue_counts.empty:
+                            import plotly.express as px
+                            fig = px.bar(
+                                x=venue_counts.values,
+                                y=venue_counts.index,
+                                orientation='h',
+                                title="Top 10 Venues by Order Count"
+                            )
+                            fig.update_layout(xaxis_title="Order Count", yaxis_title="Venue")
+                            st.plotly_chart(fig, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error creating venue chart: {e}")
+                
+                if date_col:
+                    st.subheader("Orders Over Time")
+                    try:
+                        # Convert dates and group by month
+                        orders_df[date_col] = pd.to_datetime(orders_df[date_col], errors='coerce')
+                        monthly_orders = orders_df.groupby(orders_df[date_col].dt.to_period('M')).size()
+                        
+                        if not monthly_orders.empty:
+                            import plotly.express as px
+                            fig = px.line(
+                                x=monthly_orders.index.astype(str),
+                                y=monthly_orders.values,
+                                title="Orders by Month"
+                            )
+                            fig.update_layout(xaxis_title="Month", yaxis_title="Order Count")
+                            st.plotly_chart(fig, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error creating time series chart: {e}")
+        else:
+            st.error("Could not load data for analysis")
     
     elif app_choice == "Account Availability Checker":
         st.header("🎫 Account Availability Checker")
         st.write("Check ticket availability for specific events using the three availability rules")
         
-        # Load theater-to-platform mapping from CSV file FIRST
-        THEATER_PLATFORM_MAPPING = {}
+        # Load theater-to-platform mapping - use fallback data since CSV may not be available in cloud
+        THEATER_PLATFORM_MAPPING = {
+            "Academy of Music at Kimmel": "Ensemble",
+            "Marian Anderson Hall": "Ensemble", 
+            "Miller Theather at Kimmel": "Ensemble",
+            "Buell Theatre": "Denver Center",
+            "The Marvin and Judi Wolf Theatre": "Denver Center",
+            "Steinmetz Hall": "Dr Phillips", 
+            "Walt Disney Theater": "Dr Phillips",
+            "Kia Center": "Dr Phillips",
+            "Des Moines Civic Center": "Des Moines Civic Center",
+            "Abravanel Hall": "ArtTix",
+            "Delta Hall": "ArtTix",
+            "Eccles Theater": "ArtTix",
+            "Janet Quinney Lawson Capitol Theatre": "ArtTix",
+            "The Greek Theater": "Cal Performances",
+            "Zellerbach Hall": "Cal Performances",
+            "Helzberg Hall": "Kauffman Center",
+            "Muriel Kauffman Theater": "Kauffman Center",
+            "Merrill Auditorium": "PortTix",
+            "Hawks Mainstage at Omaha Community Playhouse": "Ticketomaha",
+            "Kiewit Concert Hall at Holland Performing Arts Center": "Ticketomaha",
+            "Orpheum Theater": "Ticketomaha"
+        }
+        
+        # Try to load from CSV if available, but don't fail if it's not
         try:
             mapping_df = pd.read_csv('TheaterMapping_v2.csv')
             # Create dictionary: Theater -> Venue Platform
+            csv_mapping = {}
             for _, row in mapping_df.iterrows():
                 theater_name = row['Theater'].strip()
                 platform_name = row['Venue Platform'].strip()
-                THEATER_PLATFORM_MAPPING[theater_name] = platform_name
-        except Exception as e:
-            st.sidebar.error(f"❌ Could not load theater mappings: {e}")
-            # Fallback to manual mappings if CSV fails
-            THEATER_PLATFORM_MAPPING = {
-                "Academy of Music at Kimmel": "Ensemble",
-                "Buell Theatre": "Denver Center",
-                "Steinmetz Hall": "Dr Phillips", 
-                "Walt Disney Theater": "Dr Phillips",
-                "Des Moines Civic Center": "Des Moines Civic Center",
-            }
+                csv_mapping[theater_name] = platform_name
+            # Update with CSV data if available
+            THEATER_PLATFORM_MAPPING.update(csv_mapping)
+            st.sidebar.info(f"📁 Loaded {len(csv_mapping)} additional mappings from CSV")
+        except Exception:
+            # CSV not available in cloud, use fallback mappings
+            st.sidebar.info(f"🗺️ Using {len(THEATER_PLATFORM_MAPPING)} built-in theater mappings")
         
         # === Sidebar Controls ===
         st.sidebar.header("Prospective Purchase Details")

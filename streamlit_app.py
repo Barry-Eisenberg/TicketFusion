@@ -6,6 +6,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import re
+import toml
 
 # Configure the page
 st.set_page_config(
@@ -24,7 +25,7 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
     
     # Check for email column - try different possible names
     email_col = None
-    for col in ['email', 'Email', 'EMAIL', 'Email Address', 'email_address']:
+    for col in ["email", "Email", "EMAIL", "user_email", "customer_email"]:
         if col in orders.columns:
             email_col = col
             break
@@ -32,8 +33,8 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
     if email_col is None:
         return True, ["Email column not found in order data"]
     
-    # Filter orders for this email
     try:
+        # Filter orders for this email
         user_orders = orders[orders[email_col].astype(str).str.lower().str.strip() == email.lower().strip()]
     except Exception:
         return True, ["Error filtering orders by email"]
@@ -41,92 +42,70 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
     if user_orders.empty:
         return True, []
     
+    # Apply the three availability rules
     reasons = []
+    is_available = True
     
-    # Rule 1: No orders in the last 12 months
-    sold_date_cols = ['sold_date', 'Sold Date', 'SOLD_DATE', 'sold_date_new']
-    sold_col = None
-    for col in sold_date_cols:
-        if col in user_orders.columns:
-            sold_col = col
-            break
-    
-    if sold_col:
-        try:
+    try:
+        # Rule 1: No more than 6 tickets in the last 12 months
+        if 'sold_date' in user_orders.columns and 'cnt' in user_orders.columns:
             twelve_months_ago = today - timedelta(days=365)
-            # Convert to datetime if not already
-            dates = pd.to_datetime(user_orders[sold_col], errors='coerce')
-            recent_orders = dates[dates >= twelve_months_ago]
-            if not recent_orders.empty:
-                reasons.append("Has orders within last 12 months")
-        except Exception:
-            pass  # Skip this rule if date conversion fails
-    
-    # Rule 2: No orders for the same event (if event specified)
-    if event:
-        event_cols = ['event', 'Event', 'EVENT', 'Event Name']
-        event_col = None
-        for col in event_cols:
-            if col in user_orders.columns:
-                event_col = col
-                break
+            recent_orders = user_orders[
+                pd.to_datetime(user_orders['sold_date'], errors='coerce') >= twelve_months_ago
+            ]
+            total_tickets_12m = recent_orders['cnt'].sum()
+            
+            if total_tickets_12m + cnt_new > 6:
+                is_available = False
+                reasons.append(f"Would exceed 6 tickets in 12 months (current: {total_tickets_12m}, requesting: {cnt_new})")
         
-        if event_col:
-            try:
-                same_event_orders = user_orders[user_orders[event_col].astype(str).str.strip() == event.strip()]
-                if not same_event_orders.empty:
-                    reasons.append(f"Already has orders for event: {event}")
-            except Exception:
-                pass  # Skip this rule if comparison fails
-    
-    # Rule 3: No multiple purchases for same (Event + Theater) on different dates
-    if event and theater:
-        event_cols = ['event', 'Event', 'EVENT', 'Event Name']
-        theater_cols = ['theater', 'Theater', 'THEATER', 'Venue', 'venue']
+        # Rule 2: No more than 4 tickets for the same event
+        if event and 'event' in user_orders.columns and 'cnt' in user_orders.columns:
+            event_orders = user_orders[
+                user_orders['event'].astype(str).str.contains(event, case=False, na=False)
+            ]
+            total_tickets_event = event_orders['cnt'].sum()
+            
+            if total_tickets_event + cnt_new > 4:
+                is_available = False
+                reasons.append(f"Would exceed 4 tickets for event '{event}' (current: {total_tickets_event}, requesting: {cnt_new})")
         
-        event_col = None
-        theater_col = None
-        
-        for col in event_cols:
-            if col in user_orders.columns:
-                event_col = col
-                break
-        
-        for col in theater_cols:
-            if col in user_orders.columns:
-                theater_col = col
-                break
-        
-        if event_col and theater_col:
-            try:
-                same_event_theater = user_orders[
-                    (user_orders[event_col].astype(str).str.strip() == event.strip()) &
-                    (user_orders[theater_col].astype(str).str.strip() == theater.strip())
+        # Rule 3: No purchases within 30 days of event date
+        if event_date and sold_date_new and 'sold_date' in user_orders.columns:
+            days_before_event = (event_date - sold_date_new).days
+            
+            if days_before_event < 30:
+                # Check if user has existing orders for events close to this date
+                user_orders['event_date'] = pd.to_datetime(user_orders.get('event_date', []), errors='coerce')
+                close_orders = user_orders[
+                    abs((user_orders['event_date'] - event_date).dt.days) <= 30
                 ]
-                if len(same_event_theater) > 0:
-                    reasons.append(f"Already has orders for {event} at {theater}")
-            except Exception:
-                pass  # Skip this rule if comparison fails
+                
+                if not close_orders.empty:
+                    is_available = False
+                    reasons.append(f"Cannot purchase within 30 days of event (purchase date: {sold_date_new.date()}, event date: {event_date.date()})")
     
-    # If any rules failed, not available
-    is_available = len(reasons) == 0
+    except Exception as e:
+        # If there's any error in rule checking, default to available
+        reasons.append(f"Rule checking error: {str(e)}")
+        
     return is_available, reasons
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_google_sheets_data():
     """Load data from Google Sheets with proper error handling"""
     try:
-        # Get credentials from Streamlit secrets
-        if "google_service_account" not in st.secrets:
-            st.error("Google service account credentials not found in secrets. Please configure them in Streamlit Cloud.")
-            return None
-            
-        if "GOOGLE_SHEETS_DOC_ID" not in st.secrets:
-            st.error("Google Sheets document ID not found in secrets. Please configure GOOGLE_SHEETS_DOC_ID in Streamlit Cloud.")
-            return None
-            
-        credentials_dict = dict(st.secrets["google_service_account"])
-        doc_id = st.secrets["GOOGLE_SHEETS_DOC_ID"]
+        # Try to get credentials from Streamlit secrets, fallback to direct file read
+        doc_id = None
+        try:
+            credentials_dict = dict(st.secrets["google_service_account"])
+            doc_id = st.secrets["GOOGLE_SHEETS_DOC_ID"]
+        except Exception:
+            # Fallback: read directly from the ready file
+            with open("STREAMLIT_SECRETS_READY.toml", "r") as f:
+                secrets = toml.load(f)
+                credentials_dict = dict(secrets["google_service_account"])
+                doc_id = secrets["GOOGLE_SHEETS_DOC_ID"]
         
         # Define the required scopes for Google Sheets
         scopes = [
@@ -154,41 +133,76 @@ def load_google_sheets_data():
         data = {}
         for worksheet in worksheets:
             try:
-                # Get all values and convert to DataFrame
-                values = worksheet.get_all_values()
-                if values:
-                    # First row as headers
-                    headers = values[0]
-                    
-                    # Clean up headers: remove empty strings and handle duplicates
-                    cleaned_headers = []
-                    header_counts = {}
-                    
-                    for i, header in enumerate(headers):
-                        # Replace empty headers with generic names
-                        if not header or header.strip() == "":
-                            header = f"Column_{i+1}"
-                        else:
-                            header = header.strip()
-                        
-                        # Handle duplicate headers by adding suffix
-                        if header in header_counts:
-                            header_counts[header] += 1
-                            header = f"{header}_{header_counts[header]}"
-                        else:
-                            header_counts[header] = 0
-                        
-                        cleaned_headers.append(header)
-                    
-                    if len(values) > 1:
-                        df = pd.DataFrame(values[1:], columns=cleaned_headers)
-                        # Remove completely empty columns
-                        df = df.loc[:, (df != '').any(axis=0)]
+                # First try getting all records normally
+                try:
+                    records = worksheet.get_all_records()
+                    if records:
+                        df = pd.DataFrame(records)
                         data[worksheet.title] = df
+                except Exception as header_error:
+                    # If header issue, try alternative method
+                    if "header row" in str(header_error).lower() and "not unique" in str(header_error).lower():
+                        try:
+                            # Get all values and create DataFrame manually
+                            all_values = worksheet.get_all_values()
+                            
+                            # CORRECT HEADER ROWS:
+                            # Accounts: ROW 1 (index 0)
+                            # Orders: ROW 4 (index 3)
+                            if worksheet.title == 'Accounts':
+                                if all_values and len(all_values) > 1:
+                                    headers = all_values[0]  # Row 1 (index 0) for Accounts
+                                    data_rows = all_values[1:]  # Data starts from row 2
+                                else:
+                                    st.warning(f"⚠️ '{worksheet.title}' appears to be empty")
+                                    continue
+                            else:
+                                # For Orders and other sheets: ROW 4
+                                if all_values and len(all_values) > 4:
+                                    headers = all_values[3]  # Row 4 (index 3) for Orders
+                                    data_rows = all_values[4:]  # Data starts from row 5
+                                else:
+                                    st.warning(f"⚠️ '{worksheet.title}' appears to be empty")
+                                    continue
+                                
+                            # Make headers unique and meaningful
+                            unique_headers = []
+                            header_counts = {}
+                            
+                            for i, header in enumerate(headers):
+                                # Handle empty headers
+                                if not header or header.strip() == "":
+                                    header = f"Column_{i+1}"
+                                
+                                # Handle duplicate headers
+                                original_header = header
+                                counter = 0
+                                while header in header_counts:
+                                    counter += 1
+                                    header = f"{original_header}_{counter}"
+                                
+                                header_counts[header] = True
+                                unique_headers.append(header)
+                            
+                            # Create DataFrame with unique headers and correct data
+                            df = pd.DataFrame(data_rows, columns=unique_headers)
+                            data[worksheet.title] = df
+                        except Exception as fallback_error:
+                            st.error(f"❌ Failed to load '{worksheet.title}': {fallback_error}")
                     else:
-                        data[worksheet.title] = pd.DataFrame(columns=cleaned_headers)
-                else:
-                    data[worksheet.title] = pd.DataFrame()
+                        # For any other error, try manual loading with row 4 headers for Orders
+                        try:
+                            all_values = worksheet.get_all_values()
+                            if worksheet.title == 'Orders' and all_values and len(all_values) > 4:
+                                headers = all_values[3]  # Row 4 for Orders
+                                data_rows = all_values[4:]
+                                df = pd.DataFrame(data_rows, columns=headers)
+                                data[worksheet.title] = df
+                            else:
+                                raise header_error
+                        except:
+                            st.error(f"❌ Failed to load '{worksheet.title}': {header_error}")
+                            
             except Exception as e:
                 st.error(f"Error loading {worksheet.title}: {e}")
                 data[worksheet.title] = pd.DataFrame()
@@ -199,198 +213,214 @@ def load_google_sheets_data():
         st.error(f"Failed to connect to Google Sheets: {e}")
         return None
 
+def clean_currency_column(df, column_name):
+    """Clean currency values like '$1,234.56' to float"""
+    if column_name in df.columns:
+        df[column_name] = df[column_name].astype(str).str.replace('$', '').str.replace(',', '')
+        df[column_name] = pd.to_numeric(df[column_name], errors='coerce')
+    return df
+
 def main():
-    st.title("🎭 TicketFusion Dashboard")
+    st.title("🎫 TicketFusion Dashboard")
     st.markdown("---")
     
-    # Navigation
+    # Load data
+    with st.spinner("Loading data from Google Sheets..."):
+        sheets_data = load_google_sheets_data()
+
+    # Sidebar navigation
+    st.sidebar.title("Navigation")
     app_choice = st.sidebar.selectbox(
-        "Choose App", 
-        ["Home", "Data Overview", "Account Availability Checker"],
-        index=0
+        "Choose an application:",
+        ["Home", "Analytics", "Account Availability Checker"]
     )
     
     if app_choice == "Home":
-        st.header("Welcome to TicketFusion Dashboard")
-        st.write("""
-        This dashboard provides tools for analyzing ticket sales data and checking account availability.
+        st.header("Welcome to TicketFusion")
+        st.write("Your integrated ticketing and analytics platform.")
         
-        **Available Features:**
-        - **Data Overview**: View and analyze your ticket sales data
-        - **Account Availability Checker**: Check if accounts are eligible for new purchases
-        """)
-        
-    elif app_choice == "Data Overview":
-        st.header("📊 Data Overview & Analytics")
-        
-        # Load data
-        sheets_data = load_google_sheets_data()
+        # Quick Summary
         if sheets_data:
-            # First show raw data in expandable sections
-            st.subheader("📋 Raw Data")
-            for sheet_name, df in sheets_data.items():
-                with st.expander(f"📋 {sheet_name} ({len(df)} rows)"):
-                    if not df.empty:
-                        try:
-                            # Display first 10 rows with error handling
-                            display_df = df.head(10)
-                            # Reset index to avoid any index-related issues
-                            display_df = display_df.reset_index(drop=True)
-                            st.dataframe(display_df, use_container_width=True)
-                            st.write(f"Columns: {', '.join(df.columns)}")
-                        except Exception as e:
-                            st.error(f"Error displaying data for {sheet_name}: {e}")
-                            st.write(f"Sheet has {len(df)} rows and {len(df.columns)} columns")
-                            st.write(f"Columns: {', '.join(df.columns)}")
-                    else:
-                        st.info("No data available")
+            col1, col2, col3, col4 = st.columns(4)
             
-            # Add analytics if Orders data is available
-            if 'Orders' in sheets_data and not sheets_data['Orders'].empty:
-                st.subheader("📈 Analytics")
-                orders_df = sheets_data['Orders'].copy()
+            with col1:
+                st.metric("📊 Total Sheets", len(sheets_data))
+            with col2:
+                total_rows = sum(len(df) for df in sheets_data.values())
+                st.metric("📋 Total Records", f"{total_rows:,}")
+            with col3:
+                if 'Orders' in sheets_data:
+                    st.metric("🛒 Orders", len(sheets_data['Orders']))
+                else:
+                    st.metric("🛒 Orders", "N/A")
+            with col4:
+                if 'Accounts' in sheets_data:
+                    st.metric("👥 Accounts", len(sheets_data['Accounts']))
+                else:
+                    st.metric("👥 Accounts", "N/A")
+            
+            st.markdown("---")
+        
+        # Show basic data status
+        with st.expander("📊 Data Status", expanded=False):
+            if sheets_data:
+                st.success(f"✅ Connected to Google Sheets - {len(sheets_data)} worksheets loaded")
                 
-                # Try to find date and venue columns
-                date_cols = ['Sold Date', 'sold_date', 'Date', 'Event Date', 'event_date']
-                venue_cols = ['Theater', 'theater', 'Venue', 'venue']
-                event_cols = ['Event', 'event', 'Event Name', 'event_name']
-                
-                date_col = None
-                venue_col = None
-                event_col = None
-                
-                for col in date_cols:
-                    if col in orders_df.columns:
-                        date_col = col
-                        break
-                
-                for col in venue_cols:
-                    if col in orders_df.columns:
-                        venue_col = col
-                        break
-                        
-                for col in event_cols:
-                    if col in orders_df.columns:
-                        event_col = col
-                        break
-                
-                # Show basic metrics
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Orders", len(orders_df))
-                with col2:
-                    if venue_col:
-                        unique_venues = orders_df[venue_col].nunique()
-                        st.metric("Unique Venues", unique_venues)
-                    else:
-                        st.metric("Venues", "N/A")
-                with col3:
-                    if event_col:
-                        unique_events = orders_df[event_col].nunique()
-                        st.metric("Unique Events", unique_events)
-                    else:
-                        st.metric("Events", "N/A")
-                
-                # Charts if we have the right columns
-                if venue_col:
-                    st.subheader("Orders by Venue")
-                    try:
-                        venue_counts = orders_df[venue_col].value_counts().head(10)
-                        if not venue_counts.empty:
-                            import plotly.express as px
-                            fig = px.bar(
-                                x=venue_counts.values,
-                                y=venue_counts.index,
-                                orientation='h',
-                                title="Top 10 Venues by Order Count"
-                            )
-                            fig.update_layout(xaxis_title="Order Count", yaxis_title="Venue")
-                            st.plotly_chart(fig, use_container_width=True)
-                    except Exception as e:
-                        st.error(f"Error creating venue chart: {e}")
-                
-                if date_col:
-                    st.subheader("Orders Over Time")
-                    try:
-                        # Convert dates and group by month
-                        orders_df[date_col] = pd.to_datetime(orders_df[date_col], errors='coerce')
-                        monthly_orders = orders_df.groupby(orders_df[date_col].dt.to_period('M')).size()
-                        
-                        if not monthly_orders.empty:
-                            import plotly.express as px
-                            fig = px.line(
-                                x=monthly_orders.index.astype(str),
-                                y=monthly_orders.values,
-                                title="Orders by Month"
-                            )
-                            fig.update_layout(xaxis_title="Month", yaxis_title="Order Count")
-                            st.plotly_chart(fig, use_container_width=True)
-                    except Exception as e:
-                        st.error(f"Error creating time series chart: {e}")
+                st.write("**Loaded sheets:**")
+                for sheet_name, df in sheets_data.items():
+                    st.write(f"• **{sheet_name}**: {len(df)} rows, {len(df.columns)} columns")
+            else:
+                st.error("❌ No data loaded")
+
+    elif app_choice == "Analytics":
+        st.header("📈 Analytics Dashboard")
+        
+        if not sheets_data:
+            st.error("No data available for analytics")
+            st.stop()
+        
+        # Automatically use Orders data for analytics
+        if 'Orders' in sheets_data:
+            df = sheets_data['Orders'].copy()
         else:
-            st.error("Could not load data for analysis")
-    
+            # Fallback to first available sheet
+            df = list(sheets_data.values())[0].copy()
+        
+        if df.empty:
+            st.warning("No order data available for analytics")
+            st.stop()
+        
+        # Revenue Analysis - more flexible column detection
+        revenue_cols = [col for col in df.columns if any(word in col.lower() for word in ['revenue', 'income', 'sales', 'amount', 'total', 'price', 'cost'])]
+        cost_cols = [col for col in df.columns if any(word in col.lower() for word in ['cost', 'expense', 'fee', 'charge'])]
+        
+        if revenue_cols or cost_cols:
+            st.subheader("💰 Financial Analysis")
+            
+            col1, col2 = st.columns(2)
+            
+            # Revenue chart
+            if revenue_cols:
+                with col1:
+                    st.write("**Revenue Analysis**")
+                    revenue_col = revenue_cols[0]
+                    
+                    # Clean currency data
+                    df = clean_currency_column(df, revenue_col)
+                    
+                    if df[revenue_col].notna().any():
+                        # Revenue stats
+                        total_revenue = df[revenue_col].sum()
+                        avg_revenue = df[revenue_col].mean()
+                        st.metric("Total Revenue", f"${total_revenue:,.2f}")
+                        st.metric("Average Revenue", f"${avg_revenue:,.2f}")
+            
+            # Cost metrics
+            if cost_cols:
+                with col2:
+                    st.write("**Cost Analysis**")
+                    cost_col = cost_cols[0]
+                    
+                    # Clean currency data
+                    df = clean_currency_column(df, cost_col)
+                    
+                    if df[cost_col].notna().any():
+                        # Cost stats
+                        total_cost = df[cost_col].sum()
+                        avg_cost = df[cost_col].mean()
+                        st.metric("Total Cost", f"${total_cost:,.2f}")
+                        st.metric("Average Cost", f"${avg_cost:,.2f}")
+            
+            # Time-based charts section
+            st.subheader("📅 Trends Over Time")
+            
+            # Check for date columns for time-based analysis
+            date_cols = [col for col in df.columns if any(word in col.lower() for word in ['date', 'time', 'sold', 'event'])]
+            
+            if date_cols and (revenue_cols or cost_cols):
+                # Use the first available date column
+                date_col = date_cols[0]
+                
+                # Convert to datetime
+                try:
+                    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                    df_time = df.dropna(subset=[date_col]).copy()
+                    
+                    if not df_time.empty:
+                        # Group by date and sum values
+                        df_time['date_only'] = df_time[date_col].dt.date
+                        
+                        if revenue_cols and cost_cols:
+                            daily_data = df_time.groupby('date_only').agg({
+                                revenue_cols[0]: 'sum',
+                                cost_cols[0]: 'sum'
+                            }).reset_index()
+                            daily_data['profit'] = daily_data[revenue_cols[0]] - daily_data[cost_cols[0]]
+                        elif revenue_cols:
+                            daily_data = df_time.groupby('date_only').agg({revenue_cols[0]: 'sum'}).reset_index()
+                        
+                        chart_cols = st.columns(2)
+                        
+                        # Revenue over time
+                        if revenue_cols:
+                            with chart_cols[0]:
+                                fig_revenue_time = px.line(daily_data, x='date_only', y=revenue_cols[0],
+                                                         title='Revenue Over Time',
+                                                         labels={'date_only': 'Date', revenue_cols[0]: 'Revenue ($)'})
+                                fig_revenue_time.update_traces(line_color='#1f77b4')
+                                st.plotly_chart(fig_revenue_time, use_container_width=True)
+                        
+                        # Profit over time (if both revenue and cost exist)
+                        if revenue_cols and cost_cols:
+                            with chart_cols[1]:
+                                fig_profit_time = px.line(daily_data, x='date_only', y='profit',
+                                                        title='Profit Over Time',
+                                                        labels={'date_only': 'Date', 'profit': 'Profit ($)'})
+                                fig_profit_time.update_traces(line_color='#2ca02c')
+                                st.plotly_chart(fig_profit_time, use_container_width=True)
+                                
+                except Exception as e:
+                    st.warning(f"Could not create time-based charts: {e}")
+        else:
+            st.info("No revenue or cost columns found in the selected sheet.")
+            st.write("Available columns:", list(df.columns))
+
     elif app_choice == "Account Availability Checker":
         st.header("🎫 Account Availability Checker")
         st.write("Check ticket availability for specific events using the three availability rules")
         
-        # Load theater-to-platform mapping - use fallback data since CSV may not be available in cloud
-        THEATER_PLATFORM_MAPPING = {
-            "Academy of Music at Kimmel": "Ensemble",
-            "Marian Anderson Hall": "Ensemble", 
-            "Miller Theather at Kimmel": "Ensemble",
-            "Buell Theatre": "Denver Center",
-            "The Marvin and Judi Wolf Theatre": "Denver Center",
-            "Steinmetz Hall": "Dr Phillips", 
-            "Walt Disney Theater": "Dr Phillips",
-            "Kia Center": "Dr Phillips",
-            "Des Moines Civic Center": "Des Moines Civic Center",
-            "Abravanel Hall": "ArtTix",
-            "Delta Hall": "ArtTix",
-            "Eccles Theater": "ArtTix",
-            "Janet Quinney Lawson Capitol Theatre": "ArtTix",
-            "The Greek Theater": "Cal Performances",
-            "Zellerbach Hall": "Cal Performances",
-            "Helzberg Hall": "Kauffman Center",
-            "Muriel Kauffman Theater": "Kauffman Center",
-            "Merrill Auditorium": "PortTix",
-            "Hawks Mainstage at Omaha Community Playhouse": "Ticketomaha",
-            "Kiewit Concert Hall at Holland Performing Arts Center": "Ticketomaha",
-            "Orpheum Theater": "Ticketomaha"
-        }
-        
-        # Try to load from CSV if available, but don't fail if it's not
+        # Load theater-to-platform mapping from CSV file FIRST
+        THEATER_PLATFORM_MAPPING = {}
         try:
             mapping_df = pd.read_csv('TheaterMapping_v2.csv')
             # Create dictionary: Theater -> Venue Platform
-            csv_mapping = {}
             for _, row in mapping_df.iterrows():
                 theater_name = row['Theater'].strip()
                 platform_name = row['Venue Platform'].strip()
-                csv_mapping[theater_name] = platform_name
-            # Update with CSV data if available
-            THEATER_PLATFORM_MAPPING.update(csv_mapping)
-            st.sidebar.info(f"📁 Loaded {len(csv_mapping)} additional mappings from CSV")
-        except Exception:
-            # CSV not available in cloud, use fallback mappings
-            st.sidebar.info(f"🗺️ Using {len(THEATER_PLATFORM_MAPPING)} built-in theater mappings")
+                THEATER_PLATFORM_MAPPING[theater_name] = platform_name
+        except Exception as e:
+            st.sidebar.error(f"❌ Could not load theater mappings: {e}")
+            # Fallback to manual mappings if CSV fails
+            THEATER_PLATFORM_MAPPING = {
+                "Academy of Music at Kimmel": "Ensemble",
+                "Buell Theatre": "Denver Center",
+                "Steinmetz Hall": "Dr Phillips", 
+                "Walt Disney Theater": "Dr Phillips",
+                "Des Moines Civic Center": "Des Moines Civic Center",
+            }
         
         # === Sidebar Controls ===
         st.sidebar.header("Prospective Purchase Details")
         
-        # Load Google Sheets data
-        sheets_data = load_google_sheets_data()
-        
-        if not sheets_data:
-            st.error("Could not load Google Sheets data")
-            return
-        
-        # Orders data processing
+        # Get orders data for existing events/theaters
         orders_df = None
-        if 'Orders' in sheets_data:
+        existing_theaters = []
+        existing_events = []
+        
+        if sheets_data and 'Orders' in sheets_data:
             orders_df = sheets_data['Orders'].copy()
             
-            # Column mapping for Orders data
+            # Column mapping for Orders data (Row 4 headers, Column O=email, Column Q=theater)
             column_mapping = {
                 'Sold Date': 'sold_date',
                 'Event Date': 'event_date', 
@@ -410,9 +440,11 @@ def main():
                     orders_df['sold_date'] = pd.to_datetime(orders_df['sold_date'], errors='coerce')
                 if 'event_date' in orders_df.columns:
                     orders_df['event_date'] = pd.to_datetime(orders_df['event_date'], errors='coerce')
+                if 'cnt' in orders_df.columns:
+                    orders_df['cnt'] = pd.to_numeric(orders_df['cnt'], errors='coerce')
             except Exception as e:
                 st.warning(f"Data conversion issues: {e}")
-        
+                
         # Get unique venue platforms from the mapping
         available_platforms = []
         if THEATER_PLATFORM_MAPPING:
@@ -436,14 +468,18 @@ def main():
             if len(THEATER_PLATFORM_MAPPING) > 10:
                 st.write(f"... and {len(THEATER_PLATFORM_MAPPING) - 10} more")
         
-        # Platform dropdown (replaces theater dropdown)
-        
-        # Get events from orders data
+        # Get events from orders data (use the already processed orders_df from above)
         existing_events = []
         if orders_df is not None and 'event' in orders_df.columns:
             existing_events = sorted(orders_df['event'].dropna().astype(str).str.strip().unique().tolist())
         
-        if selected_platform and THEATER_PLATFORM_MAPPING:
+        # Event dropdown - Platform-specific events
+        if selected_platform and selected_platform.strip() and orders_df is not None:
+            # Debug: Show platform and event data for troubleshooting
+            st.sidebar.write(f"🔍 Selected Platform: '{selected_platform}'")
+            
+            # Show unique theaters/venues in orders data for this platform
+            # Get all theaters that belong to this platform
             platform_theaters = [theater for theater, platform in THEATER_PLATFORM_MAPPING.items() if platform == selected_platform]
             
             # Get events for ANY theater that belongs to this platform
@@ -480,16 +516,26 @@ def main():
         else:
             event = event_choice
         
-        # Fixed inputs for simplicity
-        event_date = "2024-12-15"  # Default event date
-        sold_date = "2024-11-15"   # Default sold date
-        cnt = st.sidebar.number_input("Ticket Count", min_value=1, max_value=10, value=1)
+        # REMOVED: event_date and sold_date inputs - use defaults
+        # Fix 3: Remove ticket count input - use default of 1
+        cnt = 1  # Fixed to 1, no input box needed
+        event_date = datetime.now().date()
+        sold_date = datetime.now().date()
         
         # Account data processing
         emails = []
-        if 'Accounts' in sheets_data:
-            df = sheets_data['Accounts']
-            if len(df.columns) >= 3:
+        if sheets_data and 'Accounts' in sheets_data:
+            df = sheets_data['Accounts'].copy()
+            st.write(f"**Accounts Data** ({len(df)} records)")
+            
+            # Show what columns actually exist for debugging
+            with st.expander("🔍 Debug: Available Columns"):
+                for i, col in enumerate(df.columns):
+                    sample_vals = df[col].dropna().unique()[:3] if not df[col].dropna().empty else []
+                    st.write(f"Column {i}: '{col}' → Sample: {list(sample_vals)}")
+            
+            # For Accounts tab: Column A = Theater, Column C = Email (Row 1 headers)
+            if len(df.columns) > 2:
                 theater_col = df.columns[0]  # Column A (Theater)
                 email_col = df.columns[2]    # Column C (Email)
                 exclude_col = df.columns[12] if len(df.columns) > 12 else None  # Column M (Exclude)
@@ -526,7 +572,6 @@ def main():
                             
                             emails = available_data[email_col].dropna().unique()
                             emails = [e for e in emails if str(e).strip() != "" and "@" in str(e) and "." in str(e)]
-                            
                             if len(excluded_data) > 0:
                                 st.sidebar.info(f"ℹ️ {len(excluded_data)} accounts excluded")
                         else:
@@ -544,52 +589,25 @@ def main():
                     if exclude_col and exclude_col in df.columns:
                         available_data = df[df[exclude_col].isna() | (df[exclude_col] == '')]
                         emails = available_data[email_col].dropna().unique()
+                        emails = [e for e in emails if str(e).strip() != "" and "@" in str(e) and "." in str(e)]
+                        st.sidebar.info(f"📊 {len(available_data)} total available accounts")
                     else:
                         emails = df[email_col].dropna().unique()
-                    
-                    emails = [e for e in emails if str(e).strip() != "" and "@" in str(e) and "." in str(e)]
-            else:
-                st.sidebar.error("Not enough columns found in Accounts data")
-        else:
-            st.sidebar.error("Accounts tab not found in Google Sheets data")
+                        emails = [e for e in emails if str(e).strip() != "" and "@" in str(e) and "." in str(e)]
         
-        # Today's date for calculations
-        today = pd.Timestamp.now()
-        
-        # Display current settings
-        st.write("### Current Settings")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Event", event if event else "Not selected")
-        with col2:
-            st.metric("Platform", selected_platform if selected_platform else "Not selected")
-        with col3:
-            st.metric("Available Emails", len(emails))
-        
-        # Availability rules explanation
-        with st.expander("📋 Availability Rules"):
-            st.write("**Rule 1:** No orders in the last 12 months")
-            st.write("**Rule 2:** No existing orders for the same event")
-            st.write("**Rule 3:** No multiple purchases for same (Event + Theater) on different event dates")
-            
-        # Get the venue platform for availability checking (it's the selected platform)
-        venue_platform = selected_platform
-        if venue_platform:
-            st.write(f"**Availability Check:** Using venue platform **{venue_platform}**")
-        
-        # Show theaters in this platform
-        if venue_platform and THEATER_PLATFORM_MAPPING:
-            theaters_in_platform = [theater for theater, platform in THEATER_PLATFORM_MAPPING.items() if platform == venue_platform]
-            st.write(f"**Platform includes theaters:** {', '.join(theaters_in_platform[:3])}{'...' if len(theaters_in_platform) > 3 else ''}")
-        
-        st.write(f"**Prospective Purchase:** {event or 'Any Event'} at {venue_platform or 'Any Platform'} on {event_date} ({cnt} ticket{'s' if cnt > 1 else ''})")
-        
-        # Check availability for each email
-        if st.button("🔍 Check Availability", type="primary"):
+        # Run check button
+        if st.sidebar.button("🎯 Check Availability", type="primary"):
             if not emails:
-                st.warning("No emails to check. Please select a platform or ensure Accounts data is loaded.")
-                return
-                
+                st.warning("No accounts found for the selected platform. Please select a platform or check your accounts data.")
+                st.stop()
+            
+            today = datetime.now()
+            sold_date = today.date()
+            
+            # Use venue platform as theater for checking
+            venue_platform = selected_platform
+            
+            # Process availability checking
             results = []
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -605,7 +623,7 @@ def main():
                     event=event or None,
                     theater=venue_platform or None,  # Use venue platform instead of theater
                     event_date=pd.Timestamp(event_date) if event_date else None,
-                    cnt_new=cnt,
+                    cnt_new=int(cnt),  # Convert to int
                     sold_date_new=pd.Timestamp(sold_date) if sold_date else None
                 )
                 
@@ -614,72 +632,68 @@ def main():
                     "available": is_available,
                     "reasons": "; ".join(reasons) if reasons else "Available",
                     "event": event or "N/A",
-                    "theater": theater or "N/A",
+                    "platform": venue_platform or "N/A",
                     "event_date": event_date,
-                    "cnt": cnt
+                    "tickets": cnt
                 })
             
-            # Clear progress indicators
-            progress_bar.empty()
-            status_text.empty()
+            status_text.text("✅ Check completed!")
+            progress_bar.progress(1.0)
             
-            # Convert results to DataFrame
-            results_df = pd.DataFrame(results)
-            
-            # Display summary
-            total_emails = len(results_df)
-            available_count = len(results_df[results_df['available'] == True])
-            unavailable_count = total_emails - available_count
-            
-            st.write("### 📊 Results Summary")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Emails", total_emails)
-            with col2:
-                st.metric("Available", available_count, delta=f"{(available_count/total_emails*100):.1f}%")
-            with col3:
-                st.metric("Unavailable", unavailable_count, delta=f"{(unavailable_count/total_emails*100):.1f}%")
-            
-            # Display detailed results
-            st.write("### 📋 Detailed Results")
-            
-            # Tabs for available vs unavailable
-            tab1, tab2, tab3 = st.tabs(["✅ Available", "❌ Unavailable", "📊 All Results"])
-            
-            with tab1:
-                available_df = results_df[results_df['available'] == True]
-                if not available_df.empty:
-                    st.dataframe(available_df[['email', 'event', 'theater']], use_container_width=True)
-                    
-                    # Download button for available emails
-                    csv = available_df['email'].to_csv(index=False, header=False)
-                    st.download_button(
-                        label="📥 Download Available Emails",
-                        data=csv,
-                        file_name=f"available_emails_{venue_platform}_{event}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.csv",
-                        mime="text/csv"
-                    )
-                else:
-                    st.info("No available emails found.")
-            
-            with tab2:
-                unavailable_df = results_df[results_df['available'] == False]
-                if not unavailable_df.empty:
-                    st.dataframe(unavailable_df[['email', 'reasons']], use_container_width=True)
-                else:
-                    st.info("All emails are available!")
-            
-            with tab3:
-                st.dataframe(results_df, use_container_width=True)
+            # Results
+            if results:
+                results_df = pd.DataFrame(results)
+                available_count = sum(1 for r in results if r["available"])
+                unavailable_count = len(results) - available_count
                 
-                # Download all results
-                csv_all = results_df.to_csv(index=False)
+                # Summary metrics
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("📧 Total Checked", len(results))
+                with col2:
+                    st.metric("✅ Available", available_count)
+                with col3:
+                    st.metric("❌ Unavailable", unavailable_count)
+                
+                # Show results tables
+                if available_count > 0:
+                    st.subheader("✅ Available Accounts")
+                    available_df = results_df[results_df["available"] == True]
+                    st.dataframe(available_df[["email", "event", "platform", "event_date", "tickets"]], use_container_width=True)
+                
+                if unavailable_count > 0:
+                    st.subheader("❌ Unavailable Accounts")
+                    unavailable_df = results_df[results_df["available"] == False]
+                    st.dataframe(unavailable_df[["email", "reasons", "event", "platform"]], use_container_width=True)
+                
+                # Download button
+                csv = results_df.to_csv(index=False)
                 st.download_button(
-                    label="📥 Download All Results",
-                    data=csv_all,
-                    file_name=f"availability_results_{venue_platform}_{event}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.csv",
+                    label="📥 Download Results CSV",
+                    data=csv,
+                    file_name=f"availability_check_{today.strftime('%Y%m%d_%H%M%S')}.csv",
                     mime="text/csv"
                 )
+        else:
+            # Show summary without running check
+            if emails:
+                st.info(f"Ready to check {len(emails)} accounts for platform: {selected_platform}")
+            
+            if selected_platform and orders_df is not None:
+                st.subheader("📊 Platform Summary")
+                platform_theaters = [theater for theater, platform in THEATER_PLATFORM_MAPPING.items() if platform == selected_platform]
+                
+                platform_orders = orders_df[orders_df['theater'].isin(platform_theaters)] if 'theater' in orders_df.columns else pd.DataFrame()
+                
+                if not platform_orders.empty:
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("🎭 Theaters", len(platform_theaters))
+                    with col2:
+                        st.metric("🎫 Total Orders", len(platform_orders))
+                    with col3:
+                        unique_events = platform_orders['event'].nunique() if 'event' in platform_orders.columns else 0
+                        st.metric("🎪 Unique Events", unique_events)
 
 if __name__ == "__main__":
     main()

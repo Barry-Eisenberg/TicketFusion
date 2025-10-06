@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import re
 import toml
 import io
+from io import BytesIO
 import openpyxl
 from tempfile import NamedTemporaryFile
 
@@ -117,17 +118,17 @@ def create_google_sheet_from_xlsx(xlsx_file, sheet_name_prefix="TicketFusion_Pro
         credentials = Credentials.from_service_account_info(credentials_dict, scopes=scopes)
         gc = gspread.authorize(credentials)
         
-        # Read XLSX file
+        # Read XLSX file directly from memory
         xlsx_data = {}
-        with NamedTemporaryFile() as tmp:
-            tmp.write(xlsx_file.getvalue())
-            tmp.flush()
-            
-            # Load all sheets from XLSX
-            xl_file = pd.ExcelFile(tmp.name)
-            for sheet_name in xl_file.sheet_names:
-                df = pd.read_excel(tmp.name, sheet_name=sheet_name)
-                xlsx_data[sheet_name] = df
+        
+        # Create a BytesIO object from the uploaded file
+        xlsx_bytes = BytesIO(xlsx_file.getvalue())
+        
+        # Load all sheets from XLSX
+        xl_file = pd.ExcelFile(xlsx_bytes)
+        for sheet_name in xl_file.sheet_names:
+            df = pd.read_excel(xlsx_bytes, sheet_name=sheet_name)
+            xlsx_data[sheet_name] = df
         
         # Create a new Google Sheet
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

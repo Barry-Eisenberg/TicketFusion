@@ -432,13 +432,6 @@ def main():
                     else:
                         st.sidebar.error("No sheet available to view")
 
-    # Sidebar navigation
-    st.sidebar.title("Navigation")
-    app_choice = st.sidebar.selectbox(
-        "Choose an application:",
-        ["Home", "Analytics", "Account Availability Checker"]
-    )
-    
     # Display Template Sheet ID (read-only, for reference)
     if data_source == "Production Data (XLSX Upload)":
         st.sidebar.markdown("---")
@@ -449,7 +442,11 @@ def main():
             help="Pre-configured template sheet ID (read-only)"
         )
     
-    if app_choice == "Home":
+    # Main Navigation Tabs
+    tab1, tab2, tab3 = st.tabs(["🏠 Home", "📈 Analytics", "🎫 Account Availability Checker"])
+    
+    with tab1:
+        # HOME TAB
         st.header("Welcome to TicketFusion - Production Version")
         st.write("Your integrated ticketing and analytics platform with production data support.")
         
@@ -486,7 +483,8 @@ def main():
             
             st.markdown("---")
 
-    elif app_choice == "Analytics":
+    with tab2:
+        # ANALYTICS TAB
         st.header("📈 Analytics Dashboard")
         
         # Auto-load data if we have a production sheet ID but no sheets_data
@@ -766,7 +764,8 @@ def main():
             st.info("No revenue or cost columns found in the selected sheet.")
             st.write("Available columns:", list(df.columns))
 
-    elif app_choice == "Account Availability Checker":
+    with tab3:
+        # ACCOUNT AVAILABILITY CHECKER TAB
         st.header("🎫 Account Availability Checker")
         st.write("Check ticket availability for specific events using the availability rules below")
         

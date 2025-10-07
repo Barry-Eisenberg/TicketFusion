@@ -329,20 +329,8 @@ def load_google_sheets_data(doc_id=None):
                                 st.sidebar.warning(f"⚠️ '{worksheet.title}' has no data rows")
                         else:
                             st.sidebar.error(f"❌ '{worksheet.title}' doesn't have enough rows for Row 4 headers")
-                            
-                            # Create DataFrame with unique headers and correct data
-                            df = pd.DataFrame(data_rows, columns=unique_headers)
-                            data[worksheet.title] = df
-                        except Exception as fallback_error:
-                            st.error(f"❌ Failed to load '{worksheet.title}': {fallback_error}")
-                    else:
-                        # For any other error, try manual loading with row 4 headers for Orders
-                        try:
-                            all_values = worksheet.get_all_values()
-                            if worksheet.title == 'Orders' and all_values and len(all_values) > 4:
-                                headers = all_values[3]  # Row 4 for Orders
-                                data_rows = all_values[4:]
-                                df = pd.DataFrame(data_rows, columns=headers)
+                    except Exception as fallback_error:
+                        st.sidebar.error(f"❌ Failed to load '{worksheet.title}': {fallback_error}")
                                 data[worksheet.title] = df
                             else:
                                 raise header_error

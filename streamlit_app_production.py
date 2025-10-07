@@ -68,17 +68,17 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
     is_available = True
     
     try:
-        # Rule 1: No more than 6 tickets in the last 12 months
+        # Rule 1: No more than 6 tickets in the last 6 months
         if 'sold_date' in user_orders.columns and 'cnt' in user_orders.columns:
-            twelve_months_ago = today - timedelta(days=365)
+            six_months_ago = today - timedelta(days=180)
             recent_orders = user_orders[
-                pd.to_datetime(user_orders['sold_date'], errors='coerce') >= twelve_months_ago
+                pd.to_datetime(user_orders['sold_date'], errors='coerce') >= six_months_ago
             ]
-            total_tickets_12m = recent_orders['cnt'].sum()
+            total_tickets_6m = recent_orders['cnt'].sum()
             
-            if total_tickets_12m + cnt_new > 6:
+            if total_tickets_6m + cnt_new > 6:
                 is_available = False
-                reasons.append(f"Would exceed 6 tickets in 12 months (current: {total_tickets_12m}, requesting: {cnt_new})")
+                reasons.append(f"Would exceed 6 tickets in 6 months (current: {total_tickets_6m}, requesting: {cnt_new})")
         
         # Rule 2: No more than 4 tickets for the same event
         if event and 'event' in user_orders.columns and 'cnt' in user_orders.columns:
@@ -604,7 +604,20 @@ def main():
 
     elif app_choice == "Account Availability Checker":
         st.header("🎫 Account Availability Checker")
-        st.write("Check ticket availability for specific events using the three availability rules")
+        st.write("Check ticket availability for specific events using the availability rules below")
+        
+        # Display current availability rules
+        st.subheader("📋 Current Availability Rules")
+        st.markdown("""
+        The following rules are applied to determine account availability:
+        
+        1. **6-Month Ticket Limit**: No more than 6 tickets purchased in the last 6 months
+        2. **Event Ticket Limit**: No more than 4 tickets for the same event
+        3. **30-Day Purchase Window**: No purchases within 30 days of the event date
+        
+        An account is marked as **unavailable** if any of these rules would be violated.
+        """)
+        st.markdown("---")
         
         # Auto-load data if we have a production sheet ID but no sheets_data
         if not sheets_data and 'production_sheet_id' in st.session_state:

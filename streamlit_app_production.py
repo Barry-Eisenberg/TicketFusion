@@ -316,14 +316,68 @@ def main():
             sheets_data = load_google_sheets_data()
     
     else:  # Production Data (XLSX Upload)
-        st.sidebar.subheader("📤 Upload Production XLSX File")
+        st.sidebar.subheader("📤 Production Data Options")
         
-        uploaded_file = st.sidebar.file_uploader(
-            "Choose XLSX file",
-            type=['xlsx'],
-            help="Upload your production data XLSX file to create a Google Sheet copy"
+        # Option to choose between creating new sheet or using existing
+        upload_option = st.sidebar.radio(
+            "Choose production data method:",
+            [
+                "Use Existing Google Sheet ID",
+                "Upload XLSX to Existing Template Sheet", 
+                "Upload XLSX & Create New Google Sheet (May Hit Quota)"
+            ],
+            index=1  # Default to template sheet method
         )
         
+        if upload_option == "Use Existing Google Sheet ID":
+            # Option to use existing Google Sheet
+            existing_sheet_id = st.sidebar.text_input(
+                "Enter Google Sheet ID:",
+                help="Paste the Google Sheet ID from the URL (e.g., 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms)"
+            )
+            
+            if existing_sheet_id and st.sidebar.button("📊 Load Existing Sheet", type="primary"):
+                with st.spinner("Loading data from existing Google Sheet..."):
+                    sheets_data = load_google_sheets_data(existing_sheet_id)
+                    if sheets_data:
+                        st.sidebar.success("✅ Successfully loaded existing Google Sheet!")
+                        st.session_state['production_sheet_id'] = existing_sheet_id
+                        st.session_state['sheets_data'] = sheets_data
+            uploaded_file = None
+            user_email = None
+
+        elif upload_option == "Upload XLSX to Existing Template Sheet":
+            # Template sheet method (recommended)
+            st.sidebar.markdown("**📋 Template Sheet Method (Recommended)**")
+            st.sidebar.info("💡 This avoids quota limits by using the pre-configured template sheet")
+            
+            template_sheet_id = st.sidebar.text_input(
+                "Template Google Sheet ID:",
+                value="1HcNCioqz8azE51WMF-XAux6byVKfuU_vgqUCbTLVt34",
+                help="Pre-configured template sheet ID for XLSX uploads"
+            )
+
+            uploaded_file = st.sidebar.file_uploader(
+                "Choose XLSX file",
+                type=['xlsx'],
+                help="Upload your production data XLSX file to replace template sheet data"
+            )
+            user_email = None
+
+        elif upload_option == "Upload XLSX & Create New Google Sheet (May Hit Quota)":
+            # Original creation method with quota warning
+            st.sidebar.warning("⚠️ This method may hit service account storage quota limits")
+            user_email = st.sidebar.text_input(
+                "Your Google Account Email:",
+                help="Enter your Google account email to share the created sheet with you"
+            )
+
+            uploaded_file = st.sidebar.file_uploader(
+                "Choose XLSX file",
+                type=['xlsx'],
+                help="Upload your production data XLSX file to create a Google Sheet copy"
+            )
+            
         if uploaded_file is not None:
             # Show file info
             st.sidebar.success(f"✅ File uploaded: {uploaded_file.name}")

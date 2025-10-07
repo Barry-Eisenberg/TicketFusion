@@ -1089,10 +1089,15 @@ def main():
                 if 'event_date' in orders_df.columns:
                     today = pd.Timestamp.now().normalize()
                     for event in unique_platform_events:
-                        event_rows = orders_df[orders_df['event'].astype(str).str.strip() == event]
+                        # Use normalized matching to find all variants of this event
+                        normalized_event = normalize_event_name(event)
+                        event_rows = orders_df[
+                            orders_df['event'].apply(normalize_event_name) == normalized_event
+                        ]
                         if not event_rows.empty:
                             event_dates = pd.to_datetime(event_rows['event_date'], errors='coerce').dropna()
-                            if not event_dates.empty and event_dates.iloc[0] >= today:
+                            # Check if ANY date is in the future (not just the first one)
+                            if not event_dates.empty and (event_dates >= today).any():
                                 platform_events.append(event)
                         else:
                             # If no date data, include the event (fallback)

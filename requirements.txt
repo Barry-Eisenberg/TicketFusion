@@ -1,10 +1,13 @@
-﻿# Core web app dependencies for Streamlit Cloud deployment
+# Core web app dependencies for Streamlit Cloud deployment
 streamlit==1.37.1
 pandas==2.2.3
 
 # Google Sheets integration
 gspread==6.1.4
 google-auth==2.34.0
+
+# Google Drive API integration
+google-api-python-client==2.149.0
 
 # XLSX file processing
 openpyxl==3.1.5

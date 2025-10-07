@@ -426,40 +426,6 @@ def main():
     # Auto-load last used production sheet if available
     if uploaded_file is None and 'production_sheet_id' in st.session_state and 'sheets_data' in st.session_state:
         sheets_data = st.session_state['sheets_data']
-
-    # Sidebar navigation
-    # --- PRODUCTION DATA ONLY: No radio buttons, no options ---
-    sheets_data = None
-    st.sidebar.subheader("📤 Production Data Upload")
-    st.sidebar.markdown("**📋 Template Sheet Method (Recommended)**")
-    st.sidebar.info("💡 This avoids quota limits by using the pre-configured template sheet")
-    template_sheet_id = st.sidebar.text_input(
-        "Template Google Sheet ID:",
-        value="1HcNCioqz8azE51WMF-XAux6byVKfuU_vgqUCbTLVt34",
-        help="Pre-configured template sheet ID for XLSX uploads"
-    )
-    uploaded_file = st.sidebar.file_uploader(
-        "Choose XLSX file",
-        type=['xlsx'],
-        help="Upload your production data XLSX file to replace template sheet data"
-    )
-    if uploaded_file is not None:
-        if st.sidebar.button("📋 Upload to Template Sheet", type="primary"):
-            with st.spinner("Uploading data to template sheet..."):
-                success = upload_xlsx_to_template_sheet(uploaded_file, template_sheet_id)
-                if success:
-                    st.success("✅ Data uploaded successfully!")
-                    st.session_state['production_sheet_id'] = template_sheet_id
-                    # Auto-load the template sheet
-                    with st.spinner("Loading data..."):
-                        sheets_data = load_google_sheets_data(template_sheet_id)
-                        if sheets_data:
-                            st.session_state['sheets_data'] = sheets_data
-                else:
-                    st.error("❌ Upload failed. Please try again.")
-    # Auto-load last used production sheet if available
-    if sheets_data is None and 'production_sheet_id' in st.session_state and 'sheets_data' in st.session_state:
-        sheets_data = st.session_state['sheets_data']
         
         if not sheets_data:
             st.error("No data available for analytics")

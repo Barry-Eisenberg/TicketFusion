@@ -30,9 +30,10 @@ def get_header_row_for_sheet(sheet_name):
 def should_skip_error_checking(sheet_name):
     """
     Determine if error checking should be skipped for this sheet.
-    Stefan Payments tab is not critical and can be skipped.
+    Stefan Payments and Limits tabs are not critical and can be skipped.
     """
-    skip_sheets = ['Stefan Payments', 'stefan payments', 'STEFAN PAYMENTS']
+    skip_sheets = ['Stefan Payments', 'stefan payments', 'STEFAN PAYMENTS', 
+                   'Limits', 'limits', 'LIMITS']
     return sheet_name in skip_sheets
 
 def check_email_availability(email, orders, today, event=None, theater=None, event_date=None, cnt_new=1, sold_date_new=None):

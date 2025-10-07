@@ -868,7 +868,12 @@ def main():
         # Platform dropdown (in main area)
         col1, col2 = st.columns(2)
         with col1:
-            selected_platform = st.selectbox("Venue Platform", options=[""] + available_platforms, index=0)
+            selected_platform = st.selectbox(
+                "Venue Platform", 
+                options=[""] + available_platforms, 
+                index=0,
+                key="venue_platform_selector"
+            )
         
         # For backward compatibility, set theater variable to selected platform
         theater = selected_platform
@@ -925,18 +930,33 @@ def main():
                 if platform_events:
                     event_choice = st.selectbox(
                         f"Events in {selected_platform}", 
-                        options=platform_events
+                        options=platform_events,
+                        key="event_selector"
                     )
                 else:
-                    event_choice = st.selectbox("Choose event", options=["No events for this platform"], disabled=True)
+                    event_choice = st.selectbox(
+                        "Choose event", 
+                        options=["No events for this platform"], 
+                        disabled=True,
+                        key="event_selector_disabled"
+                    )
             else:
                 # No platform selected - show disabled event dropdown
                 if not selected_platform or not selected_platform.strip():
-                    event_choice = st.selectbox("Choose event", options=["Select platform first"], disabled=True)
+                    event_choice = st.selectbox(
+                        "Choose event", 
+                        options=["Select platform first"], 
+                        disabled=True,
+                        key="event_selector_no_platform"
+                    )
                 else:
                     # Fallback case
                     event_options = existing_events if existing_events else ["No events available"]
-                    event_choice = st.selectbox("Choose event", options=event_options)
+                    event_choice = st.selectbox(
+                        "Choose event", 
+                        options=event_options,
+                        key="event_selector_fallback"
+                    )
         
         # Set the event variable based on the selection
         if event_choice in ["Select platform first", "No events available", "No events for this platform"]:

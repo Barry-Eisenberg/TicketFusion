@@ -431,16 +431,6 @@ def main():
                         st.sidebar.markdown(f"[🔗 Open Google Sheet]({sheet_url})")
                     else:
                         st.sidebar.error("No sheet available to view")
-
-    # Display Template Sheet ID (read-only, for reference)
-    if data_source == "Production Data (XLSX Upload)":
-        st.sidebar.markdown("---")
-        st.sidebar.text_input(
-            "Template Google Sheet ID:",
-            value="1HcNCioqz8azE51WMF-XAux6byVKfuU_vgqUCbTLVt34",
-            disabled=True,
-            help="Pre-configured template sheet ID (read-only)"
-        )
     
     # Main Navigation Tabs
     tab1, tab2, tab3 = st.tabs(["🏠 Home", "📈 Analytics", "🎫 Account Availability Checker"])

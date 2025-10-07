@@ -708,6 +708,12 @@ def main():
         if sheets_data and 'Orders' in sheets_data:
             orders_df = sheets_data['Orders'].copy()
             
+            # Debug: Show actual column names from the uploaded data
+            with st.sidebar.expander("🔍 Debug: Column Names", expanded=False):
+                st.write("Available columns in Orders data:")
+                for i, col in enumerate(orders_df.columns):
+                    st.write(f"{i+1}. '{col}'")
+            
             # Column mapping for Orders data (Row 4 headers, Column O=email, Column Q=theater)
             column_mapping = {
                 'Sold Date': 'sold_date',

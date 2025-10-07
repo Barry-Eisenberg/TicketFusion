@@ -331,12 +331,6 @@ def load_google_sheets_data(doc_id=None):
                             st.sidebar.error(f"❌ '{worksheet.title}' doesn't have enough rows for Row 4 headers")
                     except Exception as fallback_error:
                         st.sidebar.error(f"❌ Failed to load '{worksheet.title}': {fallback_error}")
-                                data[worksheet.title] = df
-                            else:
-                                raise header_error
-                        except:
-                            st.error(f"❌ Failed to load '{worksheet.title}': {header_error}")
-                            
             except Exception as e:
                 st.error(f"Error loading {worksheet.title}: {e}")
                 data[worksheet.title] = pd.DataFrame()

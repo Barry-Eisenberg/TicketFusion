@@ -125,7 +125,9 @@ def upload_xlsx_to_template_sheet(xlsx_file, template_sheet_id):
         # Load the first sheet from XLSX (primary data)
         xl_file = pd.ExcelFile(xlsx_bytes)
         first_sheet_name = xl_file.sheet_names[0]
-        df = pd.read_excel(xlsx_bytes, sheet_name=first_sheet_name)
+        
+        # Read with Row 4 as headers (skiprows=3 to skip first 3 rows, making row 4 the header)
+        df = pd.read_excel(xlsx_bytes, sheet_name=first_sheet_name, skiprows=3)
         
         # Open the existing template sheet
         spreadsheet = gc.open_by_key(template_sheet_id)
@@ -192,7 +194,8 @@ def create_google_sheet_from_xlsx(xlsx_file, sheet_name_prefix="TicketFusion_Pro
         # Load all sheets from XLSX
         xl_file = pd.ExcelFile(xlsx_bytes)
         for sheet_name in xl_file.sheet_names:
-            df = pd.read_excel(xlsx_bytes, sheet_name=sheet_name)
+            # Read with Row 4 as headers (skiprows=3 to skip first 3 rows, making row 4 the header)
+            df = pd.read_excel(xlsx_bytes, sheet_name=sheet_name, skiprows=3)
             xlsx_data[sheet_name] = df
         
         # Create a new Google Sheet
@@ -557,13 +560,6 @@ def main():
             else:
                 st.error("❌ No data loaded")
 
-    elif app_choice == "Analytics":
-        st.header("📈 Analytics Dashboard")
-        
-        if not sheets_data:
-            st.error("No data available for analytics")
-            st.stop()
-        
     elif app_choice == "Analytics":
         st.header("📈 Analytics Dashboard")
         

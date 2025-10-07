@@ -808,8 +808,8 @@ def main():
                 "Des Moines Civic Center": "Des Moines Civic Center",
             }
         
-        # === Sidebar Controls ===
-        st.sidebar.header("Prospective Purchase Details")
+        # === Prospective Purchase Details (In-Tab Controls) ===
+        st.subheader("🎯 Prospective Purchase Details")
         
         # Get orders data for existing events/theaters
         orders_df = None
@@ -841,8 +841,8 @@ def main():
             missing_cols = [col for col in required_cols if col not in orders_df.columns]
             
             if missing_cols:
-                st.sidebar.error(f"❌ Missing required columns: {missing_cols}")
-                st.sidebar.write("Available columns:", list(orders_df.columns))
+                st.error(f"❌ Missing required columns: {missing_cols}")
+                st.write("Available columns:", list(orders_df.columns))
                 st.stop()
             
             # Convert date columns
@@ -865,8 +865,10 @@ def main():
             if orders_df is not None and 'theater' in orders_df.columns:
                 available_platforms = sorted(orders_df['theater'].dropna().astype(str).str.strip().unique().tolist())
         
-        # Platform dropdown
-        selected_platform = st.sidebar.selectbox("Venue Platform", options=[""] + available_platforms, index=0)
+        # Platform dropdown (in main area)
+        col1, col2 = st.columns(2)
+        with col1:
+            selected_platform = st.selectbox("Venue Platform", options=[""] + available_platforms, index=0)
         
         # For backward compatibility, set theater variable to selected platform
         theater = selected_platform
@@ -887,62 +889,62 @@ def main():
                 existing_events = sorted(orders_df['event'].dropna().astype(str).str.strip().unique().tolist())
         
         # Event dropdown - Platform-specific events
-        if selected_platform and selected_platform.strip() and orders_df is not None:
-            # Debug: Show platform and event data for troubleshooting
-            st.sidebar.write(f"🔍 Selected Platform: '{selected_platform}'")
-            
-            # Show unique theaters/venues in orders data for this platform
-            # Get all theaters that belong to this platform
-            platform_theaters = [theater for theater, platform in THEATER_PLATFORM_MAPPING.items() if platform == selected_platform]
-            
-            # Get events for ANY theater that belongs to this platform
-            all_platform_events = []
-            for theater_name in platform_theaters:
-                theater_events = orders_df[
-                    orders_df['theater'].astype(str).str.strip() == theater_name
-                ]['event'].dropna().astype(str).str.strip().unique().tolist()
-                all_platform_events.extend(theater_events)
-            
-            # Remove duplicates and sort, then filter out past events
-            unique_platform_events = sorted(list(set(all_platform_events)))
-            
-            # Filter out past events for platform-specific events too
-            platform_events = []
-            if 'event_date' in orders_df.columns:
-                today = pd.Timestamp.now().normalize()
-                for event in unique_platform_events:
-                    event_rows = orders_df[orders_df['event'].astype(str).str.strip() == event]
-                    if not event_rows.empty:
-                        event_dates = pd.to_datetime(event_rows['event_date'], errors='coerce').dropna()
-                        if not event_dates.empty and event_dates.iloc[0] >= today:
+        with col2:
+            if selected_platform and selected_platform.strip() and orders_df is not None:
+                # Show unique theaters/venues in orders data for this platform
+                # Get all theaters that belong to this platform
+                platform_theaters = [theater for theater, platform in THEATER_PLATFORM_MAPPING.items() if platform == selected_platform]
+                
+                # Get events for ANY theater that belongs to this platform
+                all_platform_events = []
+                for theater_name in platform_theaters:
+                    theater_events = orders_df[
+                        orders_df['theater'].astype(str).str.strip() == theater_name
+                    ]['event'].dropna().astype(str).str.strip().unique().tolist()
+                    all_platform_events.extend(theater_events)
+                
+                # Remove duplicates and sort, then filter out past events
+                unique_platform_events = sorted(list(set(all_platform_events)))
+                
+                # Filter out past events for platform-specific events too
+                platform_events = []
+                if 'event_date' in orders_df.columns:
+                    today = pd.Timestamp.now().normalize()
+                    for event in unique_platform_events:
+                        event_rows = orders_df[orders_df['event'].astype(str).str.strip() == event]
+                        if not event_rows.empty:
+                            event_dates = pd.to_datetime(event_rows['event_date'], errors='coerce').dropna()
+                            if not event_dates.empty and event_dates.iloc[0] >= today:
+                                platform_events.append(event)
+                        else:
+                            # If no date data, include the event (fallback)
                             platform_events.append(event)
-                    else:
-                        # If no date data, include the event (fallback)
-                        platform_events.append(event)
+                else:
+                    platform_events = unique_platform_events
+                
+                if platform_events:
+                    event_choice = st.selectbox(
+                        f"Events in {selected_platform}", 
+                        options=platform_events
+                    )
+                else:
+                    event_choice = st.selectbox("Choose event", options=["No events for this platform"], disabled=True)
             else:
-                platform_events = unique_platform_events
-            
-            if platform_events:
-                event_choice = st.sidebar.selectbox(
-                    f"Events in {selected_platform}", 
-                    options=platform_events
-                )
-            else:
-                event_choice = st.sidebar.selectbox("Choose event", options=["No events for this platform"], disabled=True)
-        else:
-            # No platform selected - show disabled event dropdown
-            if not selected_platform or not selected_platform.strip():
-                event_choice = st.sidebar.selectbox("Choose event", options=["Select platform first"], disabled=True)
-            else:
-                # Fallback case
-                event_options = existing_events if existing_events else ["No events available"]
-                event_choice = st.sidebar.selectbox("Choose event", options=event_options)
-            
+                # No platform selected - show disabled event dropdown
+                if not selected_platform or not selected_platform.strip():
+                    event_choice = st.selectbox("Choose event", options=["Select platform first"], disabled=True)
+                else:
+                    # Fallback case
+                    event_options = existing_events if existing_events else ["No events available"]
+                    event_choice = st.selectbox("Choose event", options=event_options)
+        
         # Set the event variable based on the selection
         if event_choice in ["Select platform first", "No events available", "No events for this platform"]:
             event = ""  # No valid event selected
         else:
             event = event_choice
+        
+        st.markdown("---")
         
         # REMOVED: event_date and sold_date inputs - use defaults
         # Fix 3: Remove ticket count input - use default of 1
@@ -1009,16 +1011,16 @@ def main():
                             emails = available_data[email_col].dropna().unique()
                             emails = [e for e in emails if str(e).strip() != "" and "@" in str(e) and "." in str(e)]
                             if len(excluded_data) > 0:
-                                st.sidebar.info(f"ℹ️ {len(excluded_data)} accounts excluded")
+                                st.info(f"ℹ️ {len(excluded_data)} accounts excluded")
                         else:
                             # No exclude column, use all emails
                             emails = theater_data[email_col].dropna().unique()
                             emails = [e for e in emails if str(e).strip() != "" and "@" in str(e) and "." in str(e)]
                         
                         # Show platform-specific insights
-                        st.sidebar.info(f"📊 {len(theater_data)} total accounts")
+                        st.info(f"📊 {len(theater_data)} total accounts")
                     else:
-                        st.sidebar.error(f"❌ No accounts found for {selected_platform}")
+                        st.error(f"❌ No accounts found for {selected_platform}")
                         emails = []
                 else:
                     # Get all available emails (excluding those with exclusion dates)
@@ -1026,16 +1028,16 @@ def main():
                         available_data = df[df[exclude_col].isna() | (df[exclude_col] == '')]
                         emails = available_data[email_col].dropna().unique()
                         emails = [e for e in emails if str(e).strip() != "" and "@" in str(e) and "." in str(e)]
-                        st.sidebar.info(f"📊 {len(available_data)} total available accounts")
+                        st.info(f"📊 {len(available_data)} total available accounts")
                     else:
                         emails = df[email_col].dropna().unique()
                         emails = [e for e in emails if str(e).strip() != "" and "@" in str(e) and "." in str(e)]
         
         # Run check button
-        run_check = st.sidebar.button("🎯 Check Availability", type="primary")
+        run_check = st.button("🎯 Check Availability", type="primary")
         
         # Collapsible theater mappings (for reference) - placed after button
-        with st.sidebar.expander("🗺️ View Theater → Platform Mappings", expanded=False):
+        with st.expander("🗺️ View Theater → Platform Mappings", expanded=False):
             mapping_items = list(THEATER_PLATFORM_MAPPING.items())[:10]
             for theater_name, platform_name in mapping_items:
                 st.write(f"• {theater_name} → {platform_name}")

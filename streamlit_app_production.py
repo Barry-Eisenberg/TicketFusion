@@ -106,6 +106,50 @@ def should_skip_error_checking(sheet_name):
                    'Limits', 'limits', 'LIMITS']
     return sheet_name in skip_sheets
 
+def normalize_event_name(event_name):
+    """
+    Normalize event names for consistent matching across inconsistent data sources.
+    Handles case sensitivity, extra whitespace, and punctuation variations.
+    
+    Examples:
+        "Hamilton: An American Musical" -> "hamilton an american musical"
+        "Hamilton:  an American Musical" -> "hamilton an american musical"
+        "The Lion King" -> "lion king"
+        "the lion king" -> "lion king"
+    """
+    if pd.isna(event_name) or not event_name:
+        return ""
+    
+    # Convert to string and lowercase
+    normalized = str(event_name).lower().strip()
+    
+    # Remove common articles at the beginning that cause duplicates
+    # e.g., "The Lion King" and "Lion King" should match
+    articles = ['the ', 'a ', 'an ']
+    for article in articles:
+        if normalized.startswith(article):
+            normalized = normalized[len(article):]
+            break
+    
+    # Replace multiple spaces with single space
+    normalized = ' '.join(normalized.split())
+    
+    # Remove common punctuation that varies in data entry
+    punctuation_to_remove = [':', ',', ';', '!', '?', '.', '-', "'", '"']
+    for punct in punctuation_to_remove:
+        normalized = normalized.replace(punct, '')
+    
+    # Remove extra spaces again after punctuation removal
+    normalized = ' '.join(normalized.split())
+    
+    return normalized.strip()
+
+def events_match(event1, event2):
+    """
+    Check if two event names refer to the same event, accounting for data inconsistencies.
+    """
+    return normalize_event_name(event1) == normalize_event_name(event2)
+
 def check_email_availability(email, orders, today, event=None, theater=None, event_date=None, cnt_new=1, sold_date_new=None):
     """
     Simplified availability checker without database dependencies
@@ -152,8 +196,12 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
         
         # Rule 2: No more than 4 tickets for the same event
         if event and 'event' in user_orders.columns and 'cnt' in user_orders.columns:
+            # Normalize the target event name
+            normalized_target_event = normalize_event_name(event)
+            
+            # Filter by normalized event names
             event_orders = user_orders[
-                user_orders['event'].astype(str).str.contains(event, case=False, na=False)
+                user_orders['event'].apply(normalize_event_name) == normalized_target_event
             ]
             total_tickets_event = event_orders['cnt'].sum()
             
@@ -163,10 +211,13 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
         
         # Rule 3: No more than one transaction for the same event at the same venue within 30 days
         if event and theater and 'event' in user_orders.columns and 'theater' in user_orders.columns and 'sold_date' in user_orders.columns:
-            # Check for existing purchases of this event at this venue
+            # Normalize the target event name
+            normalized_target_event = normalize_event_name(event)
+            
+            # Check for existing purchases of this event at this venue using normalized names
             same_event_venue_orders = user_orders[
-                (user_orders['event'].astype(str).str.contains(event, case=False, na=False)) &
-                (user_orders['theater'].astype(str).str.strip() == theater.strip())
+                (user_orders['event'].apply(normalize_event_name) == normalized_target_event) &
+                (user_orders['theater'].astype(str).str.strip().str.lower() == theater.strip().lower())
             ]
             
             if not same_event_venue_orders.empty:

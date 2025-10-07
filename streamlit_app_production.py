@@ -150,6 +150,41 @@ def events_match(event1, event2):
     """
     return normalize_event_name(event1) == normalize_event_name(event2)
 
+def get_unique_events(event_list):
+    """
+    Get unique events from a list, removing duplicates based on normalized names.
+    Returns a list with one representative name for each unique event (preferring the most common variant).
+    
+    Example:
+        Input: ["The Lion King", "Lion King", "the lion king", "Hamilton"]
+        Output: ["Hamilton", "The Lion King"]  # keeps most common variant
+    """
+    if not event_list:
+        return []
+    
+    # Group events by normalized name
+    event_groups = {}
+    for event in event_list:
+        normalized = normalize_event_name(event)
+        if normalized:
+            if normalized not in event_groups:
+                event_groups[normalized] = []
+            event_groups[normalized].append(event)
+    
+    # For each group, pick the most common variant (or first if tie)
+    unique_events = []
+    for normalized, variants in event_groups.items():
+        # Count occurrences of each variant
+        variant_counts = {}
+        for variant in variants:
+            variant_counts[variant] = variant_counts.get(variant, 0) + 1
+        
+        # Pick the most common variant
+        most_common = max(variant_counts.items(), key=lambda x: x[1])[0]
+        unique_events.append(most_common)
+    
+    return sorted(unique_events)
+
 def check_email_availability(email, orders, today, event=None, theater=None, event_date=None, cnt_new=1, sold_date_new=None):
     """
     Simplified availability checker without database dependencies
@@ -1022,10 +1057,14 @@ def main():
                 today = pd.Timestamp.now().normalize()
                 # Only include events that are today or in the future
                 future_events = current_events[current_events['event_date'] >= today]
-                existing_events = sorted(future_events['event'].dropna().astype(str).str.strip().unique().tolist())
+                raw_events = future_events['event'].dropna().astype(str).str.strip().unique().tolist()
+                # Deduplicate using normalized names
+                existing_events = get_unique_events(raw_events)
             else:
                 # If no event_date column, show all events (fallback)
-                existing_events = sorted(orders_df['event'].dropna().astype(str).str.strip().unique().tolist())
+                raw_events = orders_df['event'].dropna().astype(str).str.strip().unique().tolist()
+                # Deduplicate using normalized names
+                existing_events = get_unique_events(raw_events)
         
         # Event dropdown - Platform-specific events
         with col2:
@@ -1042,8 +1081,8 @@ def main():
                     ]['event'].dropna().astype(str).str.strip().unique().tolist()
                     all_platform_events.extend(theater_events)
                 
-                # Remove duplicates and sort, then filter out past events
-                unique_platform_events = sorted(list(set(all_platform_events)))
+                # Remove duplicates using normalized names (not just simple unique)
+                unique_platform_events = get_unique_events(all_platform_events)
                 
                 # Filter out past events for platform-specific events too
                 platform_events = []

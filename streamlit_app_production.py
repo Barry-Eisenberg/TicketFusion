@@ -187,7 +187,20 @@ def get_unique_events(event_list):
 
 def check_email_availability(email, orders, today, event=None, theater=None, event_date=None, cnt_new=1, sold_date_new=None):
     """
-    Simplified availability checker without database dependencies
+    Check availability for an email based on platform-specific rules.
+    
+    Args:
+        email: Email address to check
+        orders: DataFrame of all orders
+        today: Current date
+        event: Event name (optional)
+        theater: Venue Platform name (not theater - used to filter by platform)
+        event_date: Date of the prospective event
+        cnt_new: Number of tickets for prospective purchase
+        sold_date_new: Date of prospective purchase
+    
+    Returns:
+        tuple: (is_available: bool, reasons: list)
     """
     # Check if orders DataFrame is valid and has required columns
     if orders is None or orders.empty:
@@ -212,12 +225,35 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
     if user_orders.empty:
         return True, []
     
+    # If theater (platform) is provided, filter user orders to only that platform
+    # Need to map theaters to platforms using THEATER_PLATFORM_MAPPING
+    if theater and 'theater' in user_orders.columns:
+        try:
+            # Load theater-to-platform mapping
+            mapping_df = pd.read_csv('TheaterMapping_v2.csv')
+            THEATER_PLATFORM_MAPPING = {}
+            for _, row in mapping_df.iterrows():
+                theater_name = row['Theater'].strip()
+                platform_name = row['Venue Platform'].strip()
+                THEATER_PLATFORM_MAPPING[theater_name] = platform_name
+            
+            # Get list of theaters that belong to this platform
+            platform_theaters = [t for t, p in THEATER_PLATFORM_MAPPING.items() if p == theater]
+            
+            # Filter user orders to only include orders from this platform's theaters
+            user_orders = user_orders[
+                user_orders['theater'].astype(str).str.strip().isin(platform_theaters)
+            ]
+        except Exception:
+            # If mapping fails, continue with all user orders (fallback)
+            pass
+    
     # Apply the three availability rules
     reasons = []
     is_available = True
     
     try:
-        # Rule 1: No more than 6 tickets in the last 3 months
+        # Rule 1: No more than 6 tickets in the last 3 months (PER PLATFORM)
         if 'sold_date' in user_orders.columns and 'cnt' in user_orders.columns:
             three_months_ago = today - timedelta(days=90)
             recent_orders = user_orders[
@@ -227,7 +263,8 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
             
             if total_tickets_3m + cnt_new > 6:
                 is_available = False
-                reasons.append(f"Would exceed 6 tickets in 3 months (current: {total_tickets_3m}, requesting: {cnt_new})")
+                platform_text = f" on {theater}" if theater else ""
+                reasons.append(f"Would exceed 6 tickets in 3 months{platform_text} (current: {total_tickets_3m}, requesting: {cnt_new})")
         
         # Rule 2: No more than 4 tickets for the same event
         if event and 'event' in user_orders.columns and 'cnt' in user_orders.columns:
@@ -941,13 +978,15 @@ def main():
         # Display current availability rules
         st.subheader("📋 Current Availability Rules")
         st.markdown("""
-        The following rules are applied to determine account availability:
+        The following rules are applied to determine account availability **per Venue Platform**:
         
-        1. **3-Month Ticket Limit**: No more than 6 tickets purchased in the last 3 months (90 days)
+        1. **3-Month Ticket Limit**: No more than 6 tickets purchased in the last 3 months (90 days) on this platform
         2. **Event Ticket Limit**: No more than 4 tickets for the same event
         3. **30-Day Venue Transaction Limit**: No more than one transaction for the same event at the same venue within 30 days
         
         An account is marked as **unavailable** if any of these rules would be violated.
+        
+        ℹ️ *Note: Rule 1 is platform-specific. An account may have 6 tickets on ArTix and still be available for other platforms.*
         """)
         st.markdown("---")
         

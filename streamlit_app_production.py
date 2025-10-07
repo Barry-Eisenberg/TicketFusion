@@ -419,8 +419,8 @@ def main():
                     # Auto-load the template sheet
                     with st.spinner("Loading data..."):
                         sheets_data = load_google_sheets_data(template_sheet_id)
-                        if sheets_data:
-                            st.session_state['sheets_data'] = sheets_data
+                    if sheets_data:
+                        st.session_state['sheets_data'] = sheets_data
                 else:
                     st.error("❌ Upload failed. Please try again.")
     # Auto-load last used production sheet if available
@@ -460,8 +460,6 @@ def main():
     # Auto-load last used production sheet if available
     if sheets_data is None and 'production_sheet_id' in st.session_state and 'sheets_data' in st.session_state:
         sheets_data = st.session_state['sheets_data']
-                if sheets_data:
-                    st.session_state['sheets_data'] = sheets_data
         
         if not sheets_data:
             st.error("No data available for analytics")

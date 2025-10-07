@@ -1073,37 +1073,25 @@ def main():
                 # Get all theaters that belong to this platform
                 platform_theaters = [theater for theater, platform in THEATER_PLATFORM_MAPPING.items() if platform == selected_platform]
                 
-                # Get events for ANY theater that belongs to this platform
-                all_platform_events = []
-                for theater_name in platform_theaters:
-                    theater_events = orders_df[
-                        orders_df['theater'].astype(str).str.strip() == theater_name
-                    ]['event'].dropna().astype(str).str.strip().unique().tolist()
-                    all_platform_events.extend(theater_events)
+                # Filter orders to only include this platform's theaters and future events
+                platform_orders = orders_df[
+                    orders_df['theater'].astype(str).str.strip().isin(platform_theaters)
+                ].copy()
                 
-                # Remove duplicates using normalized names (not just simple unique)
-                unique_platform_events = get_unique_events(all_platform_events)
-                
-                # Filter out past events for platform-specific events too
-                platform_events = []
-                if 'event_date' in orders_df.columns:
+                # Filter by future dates if event_date column exists
+                if 'event_date' in platform_orders.columns:
+                    platform_orders['event_date'] = pd.to_datetime(platform_orders['event_date'], errors='coerce')
                     today = pd.Timestamp.now().normalize()
-                    for event in unique_platform_events:
-                        # Use normalized matching to find all variants of this event
-                        normalized_event = normalize_event_name(event)
-                        event_rows = orders_df[
-                            orders_df['event'].apply(normalize_event_name) == normalized_event
-                        ]
-                        if not event_rows.empty:
-                            event_dates = pd.to_datetime(event_rows['event_date'], errors='coerce').dropna()
-                            # Check if ANY date is in the future (not just the first one)
-                            if not event_dates.empty and (event_dates >= today).any():
-                                platform_events.append(event)
-                        else:
-                            # If no date data, include the event (fallback)
-                            platform_events.append(event)
+                    # Only keep events with dates today or in the future
+                    platform_orders = platform_orders[platform_orders['event_date'] >= today]
+                
+                # Get all events from the filtered platform orders
+                if not platform_orders.empty and 'event' in platform_orders.columns:
+                    all_platform_events = platform_orders['event'].dropna().astype(str).str.strip().unique().tolist()
+                    # Remove duplicates using normalized names
+                    platform_events = get_unique_events(all_platform_events)
                 else:
-                    platform_events = unique_platform_events
+                    platform_events = []
                 
                 if platform_events:
                     event_choice = st.selectbox(

@@ -91,20 +91,25 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
                 is_available = False
                 reasons.append(f"Would exceed 4 tickets for event '{event}' (current: {total_tickets_event}, requesting: {cnt_new})")
         
-        # Rule 3: No purchases within 30 days of event date
-        if event_date and sold_date_new and 'sold_date' in user_orders.columns:
-            days_before_event = (event_date - sold_date_new).days
+        # Rule 3: No more than one transaction for the same event at the same venue within 30 days
+        if event and theater and 'event' in user_orders.columns and 'theater' in user_orders.columns and 'sold_date' in user_orders.columns:
+            # Check for existing purchases of this event at this venue
+            same_event_venue_orders = user_orders[
+                (user_orders['event'].astype(str).str.contains(event, case=False, na=False)) &
+                (user_orders['theater'].astype(str).str.strip() == theater.strip())
+            ]
             
-            if days_before_event < 30:
-                # Check if user has existing orders for events close to this date
-                user_orders['event_date'] = pd.to_datetime(user_orders.get('event_date', []), errors='coerce')
-                close_orders = user_orders[
-                    abs((user_orders['event_date'] - event_date).dt.days) <= 30
+            if not same_event_venue_orders.empty:
+                # Check if any of these purchases were within the last 30 days
+                thirty_days_ago = today - timedelta(days=30)
+                recent_same_event_venue = same_event_venue_orders[
+                    pd.to_datetime(same_event_venue_orders['sold_date'], errors='coerce') >= thirty_days_ago
                 ]
                 
-                if not close_orders.empty:
+                if not recent_same_event_venue.empty:
                     is_available = False
-                    reasons.append(f"Cannot purchase within 30 days of event (purchase date: {sold_date_new.date()}, event date: {event_date.date()})")
+                    last_purchase_date = pd.to_datetime(recent_same_event_venue['sold_date'].iloc[0]).date()
+                    reasons.append(f"Already purchased '{event}' at '{theater}' within last 30 days (last purchase: {last_purchase_date})")
     
     except Exception as e:
         # If there's any error in rule checking, default to available
@@ -613,7 +618,7 @@ def main():
         
         1. **6-Month Ticket Limit**: No more than 6 tickets purchased in the last 6 months
         2. **Event Ticket Limit**: No more than 4 tickets for the same event
-        3. **30-Day Purchase Window**: No purchases within 30 days of the event date
+        3. **30-Day Venue Transaction Limit**: No more than one transaction for the same event at the same venue within 30 days
         
         An account is marked as **unavailable** if any of these rules would be violated.
         """)

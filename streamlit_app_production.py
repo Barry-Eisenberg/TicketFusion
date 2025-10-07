@@ -391,11 +391,9 @@ def main():
             sheets_data = load_google_sheets_data()
     else:  # Production Data (XLSX Upload)
         st.sidebar.subheader("📤 Production Data Options")
-        template_sheet_id = st.sidebar.text_input(
-            "Template Google Sheet ID:",
-            value="1HcNCioqz8azE51WMF-XAux6byVKfuU_vgqUCbTLVt34",
-            help="Pre-configured template sheet ID for XLSX uploads"
-        )
+        # Store template sheet ID for use
+        template_sheet_id = "1HcNCioqz8azE51WMF-XAux6byVKfuU_vgqUCbTLVt34"
+        
         uploaded_file = st.sidebar.file_uploader(
             "Choose XLSX file",
             type=['xlsx'],
@@ -415,13 +413,8 @@ def main():
                                 st.session_state['sheets_data'] = sheets_data
                     else:
                         st.error("❌ Upload failed. Please try again.")
-        # If we have a production sheet ID stored, offer to load it
+        # Option to view the sheet if available
         if 'production_sheet_id' in st.session_state:
-            st.sidebar.markdown("---")
-            if st.sidebar.button("📊 Load Production Data"):
-                with st.spinner("Loading production data..."):
-                    sheets_data = load_google_sheets_data(st.session_state['production_sheet_id'])
-            # Option to view the sheet
             if st.sidebar.button("👁️ View Sheet in Browser"):
                 if 'production_sheet_url' in st.session_state:
                     st.sidebar.markdown(f"[🔗 Open Google Sheet]({st.session_state['production_sheet_url']})")
@@ -440,6 +433,16 @@ def main():
         "Choose an application:",
         ["Home", "Analytics", "Account Availability Checker"]
     )
+    
+    # Display Template Sheet ID (read-only, for reference)
+    if data_source == "Production Data (XLSX Upload)":
+        st.sidebar.markdown("---")
+        st.sidebar.text_input(
+            "Template Google Sheet ID:",
+            value="1HcNCioqz8azE51WMF-XAux6byVKfuU_vgqUCbTLVt34",
+            disabled=True,
+            help="Pre-configured template sheet ID (read-only)"
+        )
     
     if app_choice == "Home":
         st.header("Welcome to TicketFusion - Production Version")

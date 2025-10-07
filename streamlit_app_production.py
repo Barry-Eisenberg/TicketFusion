@@ -19,6 +19,22 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+def get_header_row_for_sheet(sheet_name):
+    """
+    Determine which row contains headers based on sheet name.
+    Only 'Ordres' sheet uses Row 4, others use Row 1.
+    """
+    ordres_sheets = ['Ordres', 'ordres', 'ORDRES', 'Orders', 'orders', 'ORDERS']
+    return 4 if sheet_name in ordres_sheets else 1
+
+def should_skip_error_checking(sheet_name):
+    """
+    Determine if error checking should be skipped for this sheet.
+    Stefan Payments tab is not critical and can be skipped.
+    """
+    skip_sheets = ['Stefan Payments', 'stefan payments', 'STEFAN PAYMENTS']
+    return sheet_name in skip_sheets
+
 def check_email_availability(email, orders, today, event=None, theater=None, event_date=None, cnt_new=1, sold_date_new=None):
     """
     Simplified availability checker without database dependencies
@@ -126,8 +142,10 @@ def upload_xlsx_to_template_sheet(xlsx_file, template_sheet_id):
         xl_file = pd.ExcelFile(xlsx_bytes)
         first_sheet_name = xl_file.sheet_names[0]
         
-        # Read with Row 4 as headers (skiprows=3 to skip first 3 rows, making row 4 the header)
-        df = pd.read_excel(xlsx_bytes, sheet_name=first_sheet_name, skiprows=3)
+        # Use flexible header detection based on sheet name
+        header_row = get_header_row_for_sheet(first_sheet_name)
+        skiprows = header_row - 1 if header_row > 1 else 0
+        df = pd.read_excel(xlsx_bytes, sheet_name=first_sheet_name, skiprows=skiprows)
         
         # Open the existing template sheet
         spreadsheet = gc.open_by_key(template_sheet_id)
@@ -194,8 +212,14 @@ def create_google_sheet_from_xlsx(xlsx_file, sheet_name_prefix="TicketFusion_Pro
         # Load all sheets from XLSX
         xl_file = pd.ExcelFile(xlsx_bytes)
         for sheet_name in xl_file.sheet_names:
-            # Read with Row 4 as headers (skiprows=3 to skip first 3 rows, making row 4 the header)
-            df = pd.read_excel(xlsx_bytes, sheet_name=sheet_name, skiprows=3)
+            # Skip error-prone sheets like Stefan Payments
+            if should_skip_error_checking(sheet_name):
+                continue
+                
+            # Use flexible header detection based on sheet name
+            header_row = get_header_row_for_sheet(sheet_name)
+            skiprows = header_row - 1 if header_row > 1 else 0
+            df = pd.read_excel(xlsx_bytes, sheet_name=sheet_name, skiprows=skiprows)
             xlsx_data[sheet_name] = df
         
         # Create a new Google Sheet
@@ -271,68 +295,65 @@ def load_google_sheets_data(doc_id=None):
         worksheets = sheet.worksheets()
         worksheet_names = [ws.title for ws in worksheets]
         
-        st.sidebar.success(f"📊 Connected to Google Sheets")
-        st.sidebar.info(f"Available sheets: {', '.join(worksheet_names)}")
-        
         # Load data from each worksheet
         data = {}
         for worksheet in worksheets:
+            # Skip error-prone sheets
+            if should_skip_error_checking(worksheet.title):
+                continue
+                
             try:
-                # First try getting all records normally
-                try:
-                    records = worksheet.get_all_records()
-                    if records:
-                        df = pd.DataFrame(records)
-                        # Check if we got proper headers or just Unnamed columns
-                        if any(col.startswith('Unnamed:') for col in df.columns):
-                            raise Exception("Got unnamed columns, trying alternative method")
-                        data[worksheet.title] = df
-                except Exception as header_error:
-                    # If header issue, try alternative method with Row 4 headers
-                    st.sidebar.write(f"⚠️ Retrying {worksheet.title} with Row 4 headers...")
+                # Determine appropriate header row for this sheet
+                header_row = get_header_row_for_sheet(worksheet.title)
+                
+                # First try getting all records normally (for Row 1 headers)
+                if header_row == 1:
                     try:
-                        # Get all values and create DataFrame manually
-                        all_values = worksheet.get_all_values()
-                        
-                        # For uploaded XLSX data, headers should be in Row 4 for all sheets
-                        if all_values and len(all_values) > 4:
-                            headers = all_values[3]  # Row 4 (index 3) - this is where XLSX headers go
-                            data_rows = all_values[4:]  # Data starts from row 5
-                            
-                            # Clean up headers - remove empty ones and make unique
-                            clean_headers = []
-                            for i, header in enumerate(headers):
-                                if header and header.strip():
-                                    clean_headers.append(header.strip())
-                                else:
-                                    clean_headers.append(f"Column_{i+1}")
-                            
-                            # Filter out empty data rows
-                            filtered_data_rows = [row for row in data_rows if any(cell.strip() for cell in row if cell)]
-                            
-                            if filtered_data_rows:
-                                # Create DataFrame with proper length matching
-                                max_cols = len(clean_headers)
-                                aligned_data = []
-                                for row in filtered_data_rows:
-                                    # Pad or trim row to match header length
-                                    if len(row) < max_cols:
-                                        row.extend([''] * (max_cols - len(row)))
-                                    elif len(row) > max_cols:
-                                        row = row[:max_cols]
-                                    aligned_data.append(row)
-                                
-                                df = pd.DataFrame(aligned_data, columns=clean_headers)
+                        records = worksheet.get_all_records()
+                        if records:
+                            df = pd.DataFrame(records)
+                            # Check if we got proper headers or just Unnamed columns
+                            if not any(col.startswith('Unnamed:') for col in df.columns):
                                 data[worksheet.title] = df
-                                st.sidebar.success(f"✅ {worksheet.title}: Row 4 headers method worked")
-                            else:
-                                st.sidebar.warning(f"⚠️ '{worksheet.title}' has no data rows")
+                                continue
+                    except Exception:
+                        pass
+                
+                # For Row 4 headers or if Row 1 failed, use manual method
+                all_values = worksheet.get_all_values()
+                
+                if all_values and len(all_values) >= header_row:
+                    headers = all_values[header_row - 1]  # Convert to 0-based index
+                    data_rows = all_values[header_row:]  # Data starts after header row
+                    
+                    # Clean up headers - remove empty ones and make unique
+                    clean_headers = []
+                    for i, header in enumerate(headers):
+                        if header and header.strip():
+                            clean_headers.append(header.strip())
                         else:
-                            st.sidebar.error(f"❌ '{worksheet.title}' doesn't have enough rows for Row 4 headers")
-                    except Exception as fallback_error:
-                        st.sidebar.error(f"❌ Failed to load '{worksheet.title}': {fallback_error}")
-            except Exception as e:
-                st.error(f"Error loading {worksheet.title}: {e}")
+                            clean_headers.append(f"Column_{i+1}")
+                    
+                    # Filter out empty data rows
+                    filtered_data_rows = [row for row in data_rows if any(cell.strip() for cell in row if cell)]
+                    
+                    if filtered_data_rows:
+                        # Create DataFrame with proper length matching
+                        max_cols = len(clean_headers)
+                        aligned_data = []
+                        for row in filtered_data_rows:
+                            # Pad or trim row to match header length
+                            if len(row) < max_cols:
+                                row.extend([''] * (max_cols - len(row)))
+                            elif len(row) > max_cols:
+                                row = row[:max_cols]
+                            aligned_data.append(row)
+                        
+                        df = pd.DataFrame(aligned_data, columns=clean_headers)
+                        data[worksheet.title] = df
+                        
+            except Exception:
+                # Silently skip problematic sheets instead of showing errors
                 data[worksheet.title] = pd.DataFrame()
         
         return data
@@ -432,53 +453,45 @@ def main():
             )
             
         if uploaded_file is not None:
-            # Show file info
-            st.sidebar.success(f"✅ File uploaded: {uploaded_file.name}")
-            st.sidebar.info(f"📦 Size: {uploaded_file.size:,} bytes")
-            
             # Different button behavior based on upload method
             if upload_option == "Upload XLSX to Existing Template Sheet":
                 # Use template sheet method (no quota issues)
                 if st.sidebar.button("📋 Upload to Template Sheet", type="primary"):
-                    with st.spinner("Uploading XLSX data to template sheet..."):
+                    with st.spinner("Uploading data to template sheet..."):
                         success = upload_xlsx_to_template_sheet(uploaded_file, template_sheet_id)
                         if success:
-                            st.sidebar.success("✅ Data uploaded to template sheet successfully!")
+                            st.success("✅ Data uploaded successfully!")
                             st.session_state['production_sheet_id'] = template_sheet_id
                             # Auto-load the template sheet
-                            with st.spinner("Loading data from template sheet..."):
+                            with st.spinner("Loading data..."):
                                 sheets_data = load_google_sheets_data(template_sheet_id)
                                 if sheets_data:
                                     st.session_state['sheets_data'] = sheets_data
                         else:
-                            st.sidebar.error("❌ Failed to upload data to template sheet")
+                            st.error("❌ Upload failed. Please try again.")
                             
             elif upload_option == "Upload XLSX & Create New Google Sheet (May Hit Quota)":
                 # Create new sheet method (may hit quota)
                 if st.sidebar.button("🔄 Create Google Sheet Copy", type="primary"):
-                    with st.spinner("Creating Google Sheet from XLSX file..."):
+                    with st.spinner("Creating Google Sheet..."):
                         sheet_id, sheet_url, sheet_name = create_google_sheet_from_xlsx(uploaded_file)
                     
                     if sheet_id:
-                        st.sidebar.success("✅ Google Sheet created successfully!")
-                        st.sidebar.info(f"📄 Sheet Name: {sheet_name}")
-                        st.sidebar.info(f"🔗 Sheet ID: {sheet_id}")
+                        st.success("✅ Google Sheet created successfully!")
                         
                         # Store the sheet ID in session state for use
                         st.session_state['production_sheet_id'] = sheet_id
                         st.session_state['production_sheet_url'] = sheet_url
                         
                         # Auto-load the new sheet
-                        with st.spinner("Loading data from new Google Sheet..."):
+                        with st.spinner("Loading data..."):
                             sheets_data = load_google_sheets_data(sheet_id)
                     else:
-                        st.sidebar.error("❌ Failed to create Google Sheet")
+                        st.error("❌ Failed to create Google Sheet")
             
             # If we have a production sheet ID stored, offer to load it
             if 'production_sheet_id' in st.session_state:
                 st.sidebar.markdown("---")
-                st.sidebar.write("**🎯 Current Production Sheet:**")
-                st.sidebar.write(f"ID: `{st.session_state['production_sheet_id']}`")
                 
                 if st.sidebar.button("📊 Load Production Data"):
                     with st.spinner("Loading production data..."):
@@ -531,17 +544,6 @@ def main():
                     st.metric("👥 Accounts", "N/A")
             
             st.markdown("---")
-        
-        # Show basic data status
-        with st.expander("📊 Data Status", expanded=False):
-            if sheets_data:
-                st.success(f"✅ Connected to data source - {len(sheets_data)} worksheets loaded")
-                
-                st.write("**Loaded sheets:**")
-                for sheet_name, df in sheets_data.items():
-                    st.write(f"• **{sheet_name}**: {len(df)} rows, {len(df.columns)} columns")
-            else:
-                st.error("❌ No data loaded")
 
     elif app_choice == "Analytics":
         st.header("📈 Analytics Dashboard")
@@ -684,8 +686,7 @@ def main():
                 theater_name = row['Theater'].strip()
                 platform_name = row['Venue Platform'].strip()
                 THEATER_PLATFORM_MAPPING[theater_name] = platform_name
-        except Exception as e:
-            st.sidebar.error(f"❌ Could not load theater mappings: {e}")
+        except Exception:
             # Fallback to manual mappings if CSV fails
             THEATER_PLATFORM_MAPPING = {
                 "Academy of Music at Kimmel": "Ensemble",
@@ -803,7 +804,6 @@ def main():
                     options=platform_events
                 )
             else:
-                st.sidebar.warning(f"No events found for platform: {selected_platform}")
                 event_choice = st.sidebar.selectbox("Choose event", options=["No events for this platform"], disabled=True)
         else:
             # No platform selected - show disabled event dropdown
@@ -831,12 +831,6 @@ def main():
         if sheets_data and 'Accounts' in sheets_data:
             df = sheets_data['Accounts'].copy()
             st.write(f"**Accounts Data** ({len(df)} records)")
-            
-            # Show what columns actually exist for debugging
-            with st.expander("🔍 Debug: Available Columns"):
-                for i, col in enumerate(df.columns):
-                    sample_vals = df[col].dropna().unique()[:3] if not df[col].dropna().empty else []
-                    st.write(f"Column {i}: '{col}' → Sample: {list(sample_vals)}")
             
             # For Accounts tab: Column A = Theater, Column C = Email (Row 1 headers)
             if len(df.columns) > 2:

@@ -557,6 +557,22 @@ def main():
                 st.metric("🎫 Total Tickets Sold", "N/A")
         
         with kpi_col2:
+            # Total Revenue
+            if revenue_cols and df[revenue_cols[0]].notna().any():
+                total_revenue = df[revenue_cols[0]].sum()
+                st.metric("� Total Revenue", f"${total_revenue:,.2f}")
+            else:
+                st.metric("� Total Revenue", "N/A")
+        
+        with kpi_col3:
+            # Total Cost
+            if cost_cols and df[cost_cols[0]].notna().any():
+                total_cost = df[cost_cols[0]].sum()
+                st.metric("💸 Total Cost", f"${total_cost:,.2f}")
+            else:
+                st.metric("💸 Total Cost", "N/A")
+        
+        with kpi_col4:
             # Profit margin percentage
             if revenue_cols and cost_cols:
                 total_revenue = df[revenue_cols[0]].sum()
@@ -568,32 +584,6 @@ def main():
                     st.metric("💹 Profit Margin", "N/A")
             else:
                 st.metric("💹 Profit Margin", "N/A")
-        
-        with kpi_col3:
-            # Most popular event
-            if 'event' in df.columns and 'cnt' in df.columns:
-                event_popularity = df.groupby('event')['cnt'].sum().sort_values(ascending=False)
-                if not event_popularity.empty:
-                    top_event = event_popularity.index[0]
-                    top_event_tickets = int(event_popularity.iloc[0])
-                    st.metric("🌟 Most Popular Event", f"{top_event[:20]}..." if len(top_event) > 20 else top_event, f"{top_event_tickets} tickets")
-                else:
-                    st.metric("🌟 Most Popular Event", "N/A")
-            else:
-                st.metric("🌟 Most Popular Event", "N/A")
-        
-        with kpi_col4:
-            # Most active venue
-            if 'theater' in df.columns:
-                venue_activity = df.groupby('theater').size().sort_values(ascending=False)
-                if not venue_activity.empty:
-                    top_venue = venue_activity.index[0]
-                    top_venue_orders = int(venue_activity.iloc[0])
-                    st.metric("🎭 Most Active Venue", f"{top_venue[:20]}..." if len(top_venue) > 20 else top_venue, f"{top_venue_orders} orders")
-                else:
-                    st.metric("🎭 Most Active Venue", "N/A")
-            else:
-                st.metric("🎭 Most Active Venue", "N/A")
         
         st.markdown("---")
         

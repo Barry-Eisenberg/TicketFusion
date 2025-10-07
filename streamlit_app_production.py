@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
@@ -18,6 +20,74 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def load_xlsx_from_google_drive(file_id=None):
+    """
+    Download XLSX file from Google Drive and load all sheets into a dictionary of DataFrames
+    """
+    try:
+        # Get file_id from secrets if not provided
+        if file_id is None:
+            try:
+                file_id = st.secrets["PRODUCTION_DRIVE_FILE_ID"]
+            except Exception:
+                with open("STREAMLIT_SECRETS_READY.toml", "r") as f:
+                    secrets = toml.load(f)
+                    file_id = secrets["PRODUCTION_DRIVE_FILE_ID"]
+        
+        # Get credentials
+        try:
+            credentials_dict = dict(st.secrets["google_service_account"])
+        except Exception:
+            with open("STREAMLIT_SECRETS_READY.toml", "r") as f:
+                secrets = toml.load(f)
+                credentials_dict = dict(secrets["google_service_account"])
+        
+        # Define required scopes (including Drive API)
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive.readonly"
+        ]
+        
+        # Create credentials
+        credentials = Credentials.from_service_account_info(credentials_dict, scopes=scopes)
+        
+        # Build Drive API service
+        drive_service = build('drive', 'v3', credentials=credentials)
+        
+        # Download the file
+        request = drive_service.files().get_media(fileId=file_id)
+        file_bytes = BytesIO()
+        downloader = MediaIoBaseDownload(file_bytes, request)
+        
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        
+        # Reset file pointer to beginning
+        file_bytes.seek(0)
+        
+        # Load all sheets from XLSX
+        xlsx_data = {}
+        xl_file = pd.ExcelFile(file_bytes)
+        
+        for sheet_name in xl_file.sheet_names:
+            # Skip error-prone sheets
+            if should_skip_error_checking(sheet_name):
+                continue
+            
+            # Use flexible header detection based on sheet name
+            header_row = get_header_row_for_sheet(sheet_name)
+            skiprows = header_row - 1 if header_row > 1 else 0
+            df = pd.read_excel(file_bytes, sheet_name=sheet_name, skiprows=skiprows)
+            xlsx_data[sheet_name] = df
+        
+        return xlsx_data
+        
+    except Exception as e:
+        st.error(f"Failed to load XLSX from Google Drive: {e}")
+        return None
 
 def get_header_row_for_sheet(sheet_name):
     """
@@ -383,14 +453,31 @@ def main():
     st.sidebar.header("📊 Data Source")
     data_source = st.sidebar.radio(
         "Choose data source:",
-        ["Test Data (Google Sheets)", "Production Data (XLSX Upload)"],
-        index=1  # Default to Production Data
+        ["Production Data (Google Drive)", "Production Data (XLSX Upload)", "Test Data (Google Sheets)"],
+        index=0  # Default to Production Data from Google Drive
     )
     
     sheets_data = None
     
 
-    if data_source == "Test Data (Google Sheets)":
+    if data_source == "Production Data (Google Drive)":
+        # Load directly from Google Drive
+        st.sidebar.subheader("☁️ Google Drive Connection")
+        st.sidebar.info("Auto-loading from Google Drive...")
+        
+        if st.sidebar.button("🔄 Refresh Data", type="primary"):
+            st.cache_data.clear()  # Clear cache to force refresh
+            st.rerun()
+        
+        with st.spinner("Loading production data from Google Drive..."):
+            sheets_data = load_xlsx_from_google_drive()
+            if sheets_data:
+                st.session_state['sheets_data'] = sheets_data
+                st.sidebar.success(f"✅ Loaded {len(sheets_data)} sheets from Drive")
+            else:
+                st.sidebar.error("❌ Failed to load from Google Drive. Check file sharing permissions.")
+                
+    elif data_source == "Test Data (Google Sheets)":
         # Load from existing test Google Sheets
         with st.spinner("Loading test data from Google Sheets..."):
             sheets_data = load_google_sheets_data()
@@ -441,7 +528,13 @@ def main():
         st.write("Your integrated ticketing and analytics platform with production data support.")
         
         # Data source info
-        if data_source == "Production Data (XLSX Upload)":
+        if data_source == "Production Data (Google Drive)":
+            st.info("☁️ **Production Mode**: Connected to live Google Drive XLSX file")
+            if sheets_data:
+                st.success(f"✅ Production data loaded successfully from Google Drive")
+            else:
+                st.warning("⚠️ No production data loaded. Check Google Drive connection and file sharing.")
+        elif data_source == "Production Data (XLSX Upload)":
             st.info("🏭 **Production Mode**: Upload XLSX files to create Google Sheet copies for analysis")
             
             if 'production_sheet_id' in st.session_state:

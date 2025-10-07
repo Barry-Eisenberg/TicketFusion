@@ -283,51 +283,52 @@ def load_google_sheets_data(doc_id=None):
                     records = worksheet.get_all_records()
                     if records:
                         df = pd.DataFrame(records)
+                        # Check if we got proper headers or just Unnamed columns
+                        if any(col.startswith('Unnamed:') for col in df.columns):
+                            raise Exception("Got unnamed columns, trying alternative method")
                         data[worksheet.title] = df
                 except Exception as header_error:
-                    # If header issue, try alternative method
-                    if "header row" in str(header_error).lower() and "not unique" in str(header_error).lower():
-                        try:
-                            # Get all values and create DataFrame manually
-                            all_values = worksheet.get_all_values()
+                    # If header issue, try alternative method with Row 4 headers
+                    st.sidebar.write(f"⚠️ Retrying {worksheet.title} with Row 4 headers...")
+                    try:
+                        # Get all values and create DataFrame manually
+                        all_values = worksheet.get_all_values()
+                        
+                        # For uploaded XLSX data, headers should be in Row 4 for all sheets
+                        if all_values and len(all_values) > 4:
+                            headers = all_values[3]  # Row 4 (index 3) - this is where XLSX headers go
+                            data_rows = all_values[4:]  # Data starts from row 5
                             
-                            # CORRECT HEADER ROWS:
-                            # Accounts: ROW 1 (index 0)
-                            # Orders: ROW 4 (index 3)
-                            if worksheet.title == 'Accounts':
-                                if all_values and len(all_values) > 1:
-                                    headers = all_values[0]  # Row 1 (index 0) for Accounts
-                                    data_rows = all_values[1:]  # Data starts from row 2
-                                else:
-                                    st.warning(f"⚠️ '{worksheet.title}' appears to be empty")
-                                    continue
-                            else:
-                                # For Orders and other sheets: ROW 4
-                                if all_values and len(all_values) > 4:
-                                    headers = all_values[3]  # Row 4 (index 3) for Orders
-                                    data_rows = all_values[4:]  # Data starts from row 5
-                                else:
-                                    st.warning(f"⚠️ '{worksheet.title}' appears to be empty")
-                                    continue
-                                
-                            # Make headers unique and meaningful
-                            unique_headers = []
-                            header_counts = {}
-                            
+                            # Clean up headers - remove empty ones and make unique
+                            clean_headers = []
                             for i, header in enumerate(headers):
-                                # Handle empty headers
-                                if not header or header.strip() == "":
-                                    header = f"Column_{i+1}"
+                                if header and header.strip():
+                                    clean_headers.append(header.strip())
+                                else:
+                                    clean_headers.append(f"Column_{i+1}")
+                            
+                            # Filter out empty data rows
+                            filtered_data_rows = [row for row in data_rows if any(cell.strip() for cell in row if cell)]
+                            
+                            if filtered_data_rows:
+                                # Create DataFrame with proper length matching
+                                max_cols = len(clean_headers)
+                                aligned_data = []
+                                for row in filtered_data_rows:
+                                    # Pad or trim row to match header length
+                                    if len(row) < max_cols:
+                                        row.extend([''] * (max_cols - len(row)))
+                                    elif len(row) > max_cols:
+                                        row = row[:max_cols]
+                                    aligned_data.append(row)
                                 
-                                # Handle duplicate headers
-                                original_header = header
-                                counter = 0
-                                while header in header_counts:
-                                    counter += 1
-                                    header = f"{original_header}_{counter}"
-                                
-                                header_counts[header] = True
-                                unique_headers.append(header)
+                                df = pd.DataFrame(aligned_data, columns=clean_headers)
+                                data[worksheet.title] = df
+                                st.sidebar.success(f"✅ {worksheet.title}: Row 4 headers method worked")
+                            else:
+                                st.sidebar.warning(f"⚠️ '{worksheet.title}' has no data rows")
+                        else:
+                            st.sidebar.error(f"❌ '{worksheet.title}' doesn't have enough rows for Row 4 headers")
                             
                             # Create DataFrame with unique headers and correct data
                             df = pd.DataFrame(data_rows, columns=unique_headers)

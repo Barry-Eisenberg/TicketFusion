@@ -95,6 +95,71 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
         
     return is_available, reasons
 
+def upload_xlsx_to_template_sheet(xlsx_file, template_sheet_id):
+    """
+    Upload XLSX data to an existing Google Sheet (template sheet) - avoids quota issues
+    """
+    try:
+        # Get credentials for Google Sheets API
+        try:
+            credentials_dict = dict(st.secrets["google_service_account"])
+        except Exception:
+            with open("STREAMLIT_SECRETS_READY.toml", "r") as f:
+                secrets = toml.load(f)
+                credentials_dict = dict(secrets["google_service_account"])
+        
+        # Define the required scopes
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        
+        # Create credentials
+        credentials = Credentials.from_service_account_info(credentials_dict, scopes=scopes)
+        gc = gspread.authorize(credentials)
+        
+        # Read XLSX file directly from memory
+        from io import BytesIO
+        xlsx_bytes = BytesIO(xlsx_file.getvalue())
+        
+        # Load the first sheet from XLSX (primary data)
+        xl_file = pd.ExcelFile(xlsx_bytes)
+        first_sheet_name = xl_file.sheet_names[0]
+        df = pd.read_excel(xlsx_bytes, sheet_name=first_sheet_name)
+        
+        # Open the existing template sheet
+        spreadsheet = gc.open_by_key(template_sheet_id)
+        worksheet = spreadsheet.get_worksheet(0)  # Use the first worksheet
+        
+        # Clear existing data
+        worksheet.clear()
+        
+        # Convert DataFrame to list format for upload
+        # Handle NaN values and data types for JSON serialization
+        df_clean = df.copy()
+        
+        # Replace NaN values
+        df_clean = df_clean.fillna('')
+        
+        # Convert datetime columns to strings
+        for col in df_clean.columns:
+            if df_clean[col].dtype == 'datetime64[ns]':
+                df_clean[col] = df_clean[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+            elif 'datetime' in str(df_clean[col].dtype):
+                df_clean[col] = df_clean[col].astype(str)
+            elif 'time' in str(df_clean[col].dtype):
+                df_clean[col] = df_clean[col].astype(str)
+        
+        # Upload data to the template sheet
+        values = [df_clean.columns.values.tolist()] + df_clean.values.tolist()
+        worksheet.update(values)
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"Failed to upload to template sheet: {e}")
+        return False
+
 def create_google_sheet_from_xlsx(xlsx_file, sheet_name_prefix="TicketFusion_Production"):
     """
     Create a new Google Sheet from XLSX file data
@@ -329,6 +394,11 @@ def main():
             index=1  # Default to template sheet method
         )
         
+        # Initialize variables
+        uploaded_file = None
+        user_email = None
+        template_sheet_id = None
+        
         if upload_option == "Use Existing Google Sheet ID":
             # Option to use existing Google Sheet
             existing_sheet_id = st.sidebar.text_input(
@@ -343,8 +413,6 @@ def main():
                         st.sidebar.success("✅ Successfully loaded existing Google Sheet!")
                         st.session_state['production_sheet_id'] = existing_sheet_id
                         st.session_state['sheets_data'] = sheets_data
-            uploaded_file = None
-            user_email = None
 
         elif upload_option == "Upload XLSX to Existing Template Sheet":
             # Template sheet method (recommended)
@@ -362,7 +430,6 @@ def main():
                 type=['xlsx'],
                 help="Upload your production data XLSX file to replace template sheet data"
             )
-            user_email = None
 
         elif upload_option == "Upload XLSX & Create New Google Sheet (May Hit Quota)":
             # Original creation method with quota warning
@@ -383,10 +450,28 @@ def main():
             st.sidebar.success(f"✅ File uploaded: {uploaded_file.name}")
             st.sidebar.info(f"📦 Size: {uploaded_file.size:,} bytes")
             
-            # Option to create Google Sheet from XLSX
-            if st.sidebar.button("🔄 Create Google Sheet Copy", type="primary"):
-                with st.spinner("Creating Google Sheet from XLSX file..."):
-                    sheet_id, sheet_url, sheet_name = create_google_sheet_from_xlsx(uploaded_file)
+            # Different button behavior based on upload method
+            if upload_option == "Upload XLSX to Existing Template Sheet":
+                # Use template sheet method (no quota issues)
+                if st.sidebar.button("📋 Upload to Template Sheet", type="primary"):
+                    with st.spinner("Uploading XLSX data to template sheet..."):
+                        success = upload_xlsx_to_template_sheet(uploaded_file, template_sheet_id)
+                        if success:
+                            st.sidebar.success("✅ Data uploaded to template sheet successfully!")
+                            st.session_state['production_sheet_id'] = template_sheet_id
+                            # Auto-load the template sheet
+                            with st.spinner("Loading data from template sheet..."):
+                                sheets_data = load_google_sheets_data(template_sheet_id)
+                                if sheets_data:
+                                    st.session_state['sheets_data'] = sheets_data
+                        else:
+                            st.sidebar.error("❌ Failed to upload data to template sheet")
+                            
+            elif upload_option == "Upload XLSX & Create New Google Sheet (May Hit Quota)":
+                # Create new sheet method (may hit quota)
+                if st.sidebar.button("🔄 Create Google Sheet Copy", type="primary"):
+                    with st.spinner("Creating Google Sheet from XLSX file..."):
+                        sheet_id, sheet_url, sheet_name = create_google_sheet_from_xlsx(uploaded_file)
                     
                     if sheet_id:
                         st.sidebar.success("✅ Google Sheet created successfully!")

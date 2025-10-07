@@ -391,8 +391,6 @@ def main():
             sheets_data = load_google_sheets_data()
     else:  # Production Data (XLSX Upload)
         st.sidebar.subheader("📤 Production Data Options")
-        st.sidebar.markdown("**📋 Template Sheet Method (Recommended)**")
-        st.sidebar.info("💡 This avoids quota limits by using the pre-configured template sheet")
         template_sheet_id = st.sidebar.text_input(
             "Template Google Sheet ID:",
             value="1HcNCioqz8azE51WMF-XAux6byVKfuU_vgqUCbTLVt34",
@@ -642,12 +640,6 @@ def main():
         if sheets_data and 'Orders' in sheets_data:
             orders_df = sheets_data['Orders'].copy()
             
-            # Debug: Show actual column names from the uploaded data
-            with st.sidebar.expander("🔍 Debug: Column Names", expanded=False):
-                st.write("Available columns in Orders data:")
-                for i, col in enumerate(orders_df.columns):
-                    st.write(f"{i+1}. '{col}'")
-            
             # Column mapping for Orders data (Row 4 headers) - flexible matching
             column_mapping = {
                 'sold_date': ['Sold Date', 'sold_date', 'SoldDate', 'Date Sold'],
@@ -699,14 +691,6 @@ def main():
         
         # For backward compatibility, set theater variable to selected platform
         theater = selected_platform
-        
-        # Collapsible theater mappings (for reference)
-        with st.sidebar.expander("🗺️ View Theater → Platform Mappings", expanded=False):
-            mapping_items = list(THEATER_PLATFORM_MAPPING.items())[:10]
-            for theater_name, platform_name in mapping_items:
-                st.write(f"• {theater_name} → {platform_name}")
-            if len(THEATER_PLATFORM_MAPPING) > 10:
-                st.write(f"... and {len(THEATER_PLATFORM_MAPPING) - 10} more")
         
         # Get events from orders data (use the already processed orders_df from above)
         existing_events = []
@@ -869,7 +853,17 @@ def main():
                         emails = [e for e in emails if str(e).strip() != "" and "@" in str(e) and "." in str(e)]
         
         # Run check button
-        if st.sidebar.button("🎯 Check Availability", type="primary"):
+        run_check = st.sidebar.button("🎯 Check Availability", type="primary")
+        
+        # Collapsible theater mappings (for reference) - placed after button
+        with st.sidebar.expander("🗺️ View Theater → Platform Mappings", expanded=False):
+            mapping_items = list(THEATER_PLATFORM_MAPPING.items())[:10]
+            for theater_name, platform_name in mapping_items:
+                st.write(f"• {theater_name} → {platform_name}")
+            if len(THEATER_PLATFORM_MAPPING) > 10:
+                st.write(f"... and {len(THEATER_PLATFORM_MAPPING) - 10} more")
+        
+        if run_check:
             if not emails:
                 st.warning("No accounts found for the selected platform. Please select a platform or check your accounts data.")
                 st.stop()

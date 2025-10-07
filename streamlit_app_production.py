@@ -500,7 +500,16 @@ def main():
                 
                 # Option to view the sheet
                 if st.sidebar.button("👁️ View Sheet in Browser"):
-                    st.sidebar.markdown(f"[🔗 Open Google Sheet]({st.session_state['production_sheet_url']})")
+                    if 'production_sheet_url' in st.session_state:
+                        st.sidebar.markdown(f"[🔗 Open Google Sheet]({st.session_state['production_sheet_url']})")
+                    else:
+                        # Construct URL from sheet ID if URL not available
+                        sheet_id = st.session_state.get('production_sheet_id', '')
+                        if sheet_id:
+                            sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+                            st.sidebar.markdown(f"[🔗 Open Google Sheet]({sheet_url})")
+                        else:
+                            st.sidebar.error("No sheet available to view")
 
     # Sidebar navigation
     st.sidebar.title("Navigation")
@@ -777,7 +786,17 @@ def main():
         # Get events from orders data (use the already processed orders_df from above)
         existing_events = []
         if orders_df is not None and 'event' in orders_df.columns:
-            existing_events = sorted(orders_df['event'].dropna().astype(str).str.strip().unique().tolist())
+            # Filter out past events - only show future events
+            current_events = orders_df.copy()
+            if 'event_date' in current_events.columns:
+                current_events['event_date'] = pd.to_datetime(current_events['event_date'], errors='coerce')
+                today = pd.Timestamp.now().normalize()
+                # Only include events that are today or in the future
+                future_events = current_events[current_events['event_date'] >= today]
+                existing_events = sorted(future_events['event'].dropna().astype(str).str.strip().unique().tolist())
+            else:
+                # If no event_date column, show all events (fallback)
+                existing_events = sorted(orders_df['event'].dropna().astype(str).str.strip().unique().tolist())
         
         # Event dropdown - Platform-specific events
         if selected_platform and selected_platform.strip() and orders_df is not None:
@@ -796,8 +815,24 @@ def main():
                 ]['event'].dropna().astype(str).str.strip().unique().tolist()
                 all_platform_events.extend(theater_events)
             
-            # Remove duplicates and sort
-            platform_events = sorted(list(set(all_platform_events)))
+            # Remove duplicates and sort, then filter out past events
+            unique_platform_events = sorted(list(set(all_platform_events)))
+            
+            # Filter out past events for platform-specific events too
+            platform_events = []
+            if 'event_date' in orders_df.columns:
+                today = pd.Timestamp.now().normalize()
+                for event in unique_platform_events:
+                    event_rows = orders_df[orders_df['event'].astype(str).str.strip() == event]
+                    if not event_rows.empty:
+                        event_dates = pd.to_datetime(event_rows['event_date'], errors='coerce').dropna()
+                        if not event_dates.empty and event_dates.iloc[0] >= today:
+                            platform_events.append(event)
+                    else:
+                        # If no date data, include the event (fallback)
+                        platform_events.append(event)
+            else:
+                platform_events = unique_platform_events
             
             if platform_events:
                 event_choice = st.sidebar.selectbox(
@@ -824,8 +859,22 @@ def main():
         # REMOVED: event_date and sold_date inputs - use defaults
         # Fix 3: Remove ticket count input - use default of 1
         cnt = 1  # Fixed to 1, no input box needed
-        event_date = datetime.now().date()
-        sold_date = datetime.now().date()
+        
+        # Get actual event and purchase dates from the selected event data
+        event_date = None
+        sold_date = datetime.now().date()  # Purchase date is today (when they're buying)
+        
+        if event and orders_df is not None and 'event' in orders_df.columns:
+            # Find the selected event in the orders data to get its actual date
+            event_rows = orders_df[orders_df['event'].astype(str).str.strip() == event]
+            if not event_rows.empty and 'event_date' in orders_df.columns:
+                # Get the most recent/common event date for this event
+                event_dates = pd.to_datetime(event_rows['event_date'], errors='coerce').dropna()
+                if not event_dates.empty:
+                    event_date = event_dates.iloc[0].date()  # Use first valid date
+        
+        if event_date is None:
+            event_date = datetime.now().date() + timedelta(days=30)  # Default to 30 days from now
         
         # Account data processing
         emails = []

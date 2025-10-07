@@ -378,138 +378,63 @@ def main():
     st.sidebar.header("📊 Data Source")
     data_source = st.sidebar.radio(
         "Choose data source:",
-        ["Test Data (Google Sheets)", "Production Data (XLSX Upload)"]
+        ["Test Data (Google Sheets)", "Production Data (XLSX Upload)"],
+        index=1  # Default to Production Data
     )
     
     sheets_data = None
     
+
     if data_source == "Test Data (Google Sheets)":
         # Load from existing test Google Sheets
         with st.spinner("Loading test data from Google Sheets..."):
             sheets_data = load_google_sheets_data()
-    
     else:  # Production Data (XLSX Upload)
         st.sidebar.subheader("📤 Production Data Options")
-        
-        # Option to choose between creating new sheet or using existing
-        upload_option = st.sidebar.radio(
-            "Choose production data method:",
-            [
-                "Use Existing Google Sheet ID",
-                "Upload XLSX to Existing Template Sheet", 
-                "Upload XLSX & Create New Google Sheet (May Hit Quota)"
-            ],
-            index=1  # Default to template sheet method
+        st.sidebar.markdown("**📋 Template Sheet Method (Recommended)**")
+        st.sidebar.info("💡 This avoids quota limits by using the pre-configured template sheet")
+        template_sheet_id = st.sidebar.text_input(
+            "Template Google Sheet ID:",
+            value="1HcNCioqz8azE51WMF-XAux6byVKfuU_vgqUCbTLVt34",
+            help="Pre-configured template sheet ID for XLSX uploads"
         )
-        
-        # Initialize variables
-        uploaded_file = None
-        user_email = None
-        template_sheet_id = None
-        
-        if upload_option == "Use Existing Google Sheet ID":
-            # Option to use existing Google Sheet
-            existing_sheet_id = st.sidebar.text_input(
-                "Enter Google Sheet ID:",
-                help="Paste the Google Sheet ID from the URL (e.g., 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms)"
-            )
-            
-            if existing_sheet_id and st.sidebar.button("📊 Load Existing Sheet", type="primary"):
-                with st.spinner("Loading data from existing Google Sheet..."):
-                    sheets_data = load_google_sheets_data(existing_sheet_id)
-                    if sheets_data:
-                        st.sidebar.success("✅ Successfully loaded existing Google Sheet!")
-                        st.session_state['production_sheet_id'] = existing_sheet_id
-                        st.session_state['sheets_data'] = sheets_data
-
-        elif upload_option == "Upload XLSX to Existing Template Sheet":
-            # Template sheet method (recommended)
-            st.sidebar.markdown("**📋 Template Sheet Method (Recommended)**")
-            st.sidebar.info("💡 This avoids quota limits by using the pre-configured template sheet")
-            
-            template_sheet_id = st.sidebar.text_input(
-                "Template Google Sheet ID:",
-                value="1HcNCioqz8azE51WMF-XAux6byVKfuU_vgqUCbTLVt34",
-                help="Pre-configured template sheet ID for XLSX uploads"
-            )
-
-            uploaded_file = st.sidebar.file_uploader(
-                "Choose XLSX file",
-                type=['xlsx'],
-                help="Upload your production data XLSX file to replace template sheet data"
-            )
-
-        elif upload_option == "Upload XLSX & Create New Google Sheet (May Hit Quota)":
-            # Original creation method with quota warning
-            st.sidebar.warning("⚠️ This method may hit service account storage quota limits")
-            user_email = st.sidebar.text_input(
-                "Your Google Account Email:",
-                help="Enter your Google account email to share the created sheet with you"
-            )
-
-            uploaded_file = st.sidebar.file_uploader(
-                "Choose XLSX file",
-                type=['xlsx'],
-                help="Upload your production data XLSX file to create a Google Sheet copy"
-            )
-            
+        uploaded_file = st.sidebar.file_uploader(
+            "Choose XLSX file",
+            type=['xlsx'],
+            help="Upload your production data XLSX file to replace template sheet data"
+        )
         if uploaded_file is not None:
-            # Different button behavior based on upload method
-            if upload_option == "Upload XLSX to Existing Template Sheet":
-                # Use template sheet method (no quota issues)
-                if st.sidebar.button("📋 Upload to Template Sheet", type="primary"):
-                    with st.spinner("Uploading data to template sheet..."):
-                        success = upload_xlsx_to_template_sheet(uploaded_file, template_sheet_id)
-                        if success:
-                            st.success("✅ Data uploaded successfully!")
-                            st.session_state['production_sheet_id'] = template_sheet_id
-                            # Auto-load the template sheet
-                            with st.spinner("Loading data..."):
-                                sheets_data = load_google_sheets_data(template_sheet_id)
-                                if sheets_data:
-                                    st.session_state['sheets_data'] = sheets_data
-                        else:
-                            st.error("❌ Upload failed. Please try again.")
-                            
-            elif upload_option == "Upload XLSX & Create New Google Sheet (May Hit Quota)":
-                # Create new sheet method (may hit quota)
-                if st.sidebar.button("🔄 Create Google Sheet Copy", type="primary"):
-                    with st.spinner("Creating Google Sheet..."):
-                        sheet_id, sheet_url, sheet_name = create_google_sheet_from_xlsx(uploaded_file)
-                    
-                    if sheet_id:
-                        st.success("✅ Google Sheet created successfully!")
-                        
-                        # Store the sheet ID in session state for use
-                        st.session_state['production_sheet_id'] = sheet_id
-                        st.session_state['production_sheet_url'] = sheet_url
-                        
-                        # Auto-load the new sheet
+            if st.sidebar.button("📋 Upload to Template Sheet", type="primary"):
+                with st.spinner("Uploading data to template sheet..."):
+                    success = upload_xlsx_to_template_sheet(uploaded_file, template_sheet_id)
+                    if success:
+                        st.success("✅ Data uploaded successfully!")
+                        st.session_state['production_sheet_id'] = template_sheet_id
+                        # Auto-load the template sheet
                         with st.spinner("Loading data..."):
-                            sheets_data = load_google_sheets_data(sheet_id)
+                            sheets_data = load_google_sheets_data(template_sheet_id)
+                            if sheets_data:
+                                st.session_state['sheets_data'] = sheets_data
                     else:
-                        st.error("❌ Failed to create Google Sheet")
-            
-            # If we have a production sheet ID stored, offer to load it
-            if 'production_sheet_id' in st.session_state:
-                st.sidebar.markdown("---")
-                
-                if st.sidebar.button("📊 Load Production Data"):
-                    with st.spinner("Loading production data..."):
-                        sheets_data = load_google_sheets_data(st.session_state['production_sheet_id'])
-                
-                # Option to view the sheet
-                if st.sidebar.button("👁️ View Sheet in Browser"):
-                    if 'production_sheet_url' in st.session_state:
-                        st.sidebar.markdown(f"[🔗 Open Google Sheet]({st.session_state['production_sheet_url']})")
+                        st.error("❌ Upload failed. Please try again.")
+        # If we have a production sheet ID stored, offer to load it
+        if 'production_sheet_id' in st.session_state:
+            st.sidebar.markdown("---")
+            if st.sidebar.button("📊 Load Production Data"):
+                with st.spinner("Loading production data..."):
+                    sheets_data = load_google_sheets_data(st.session_state['production_sheet_id'])
+            # Option to view the sheet
+            if st.sidebar.button("👁️ View Sheet in Browser"):
+                if 'production_sheet_url' in st.session_state:
+                    st.sidebar.markdown(f"[🔗 Open Google Sheet]({st.session_state['production_sheet_url']})")
+                else:
+                    # Construct URL from sheet ID if URL not available
+                    sheet_id = st.session_state.get('production_sheet_id', '')
+                    if sheet_id:
+                        sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+                        st.sidebar.markdown(f"[🔗 Open Google Sheet]({sheet_url})")
                     else:
-                        # Construct URL from sheet ID if URL not available
-                        sheet_id = st.session_state.get('production_sheet_id', '')
-                        if sheet_id:
-                            sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
-                            st.sidebar.markdown(f"[🔗 Open Google Sheet]({sheet_url})")
-                        else:
-                            st.sidebar.error("No sheet available to view")
+                        st.sidebar.error("No sheet available to view")
 
     # Sidebar navigation
     st.sidebar.title("Navigation")

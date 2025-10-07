@@ -987,8 +987,6 @@ def main():
         3. **30-Day Platform Transaction Limit**: No more than one transaction for the same event on this platform within 30 days
         
         An account is marked as **unavailable** if any of these rules would be violated.
-        
-        ℹ️ *Note: **All rules are platform-specific.** An account's purchase history on one platform (e.g., ArTix) does not affect availability on another platform (e.g., Denver Center). Each platform is evaluated independently.*
         """)
         st.markdown("---")
         

@@ -266,12 +266,12 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
                 platform_text = f" on {theater}" if theater else ""
                 reasons.append(f"Would exceed 6 tickets in 3 months{platform_text} (current: {total_tickets_3m}, requesting: {cnt_new})")
         
-        # Rule 2: No more than 4 tickets for the same event
+        # Rule 2: No more than 4 tickets for the same event (PER PLATFORM)
         if event and 'event' in user_orders.columns and 'cnt' in user_orders.columns:
             # Normalize the target event name
             normalized_target_event = normalize_event_name(event)
             
-            # Filter by normalized event names
+            # Filter by normalized event names (already filtered to platform)
             event_orders = user_orders[
                 user_orders['event'].apply(normalize_event_name) == normalized_target_event
             ]
@@ -279,30 +279,32 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
             
             if total_tickets_event + cnt_new > 4:
                 is_available = False
-                reasons.append(f"Would exceed 4 tickets for event '{event}' (current: {total_tickets_event}, requesting: {cnt_new})")
+                platform_text = f" on {theater}" if theater else ""
+                reasons.append(f"Would exceed 4 tickets for event '{event}'{platform_text} (current: {total_tickets_event}, requesting: {cnt_new})")
         
-        # Rule 3: No more than one transaction for the same event at the same venue within 30 days
-        if event and theater and 'event' in user_orders.columns and 'theater' in user_orders.columns and 'sold_date' in user_orders.columns:
+        # Rule 3: No more than one transaction for the same event at any venue within this platform within 30 days
+        if event and theater and 'event' in user_orders.columns and 'sold_date' in user_orders.columns:
             # Normalize the target event name
             normalized_target_event = normalize_event_name(event)
             
-            # Check for existing purchases of this event at this venue using normalized names
-            same_event_venue_orders = user_orders[
-                (user_orders['event'].apply(normalize_event_name) == normalized_target_event) &
-                (user_orders['theater'].astype(str).str.strip().str.lower() == theater.strip().lower())
+            # Check for existing purchases of this event at ANY venue within this platform
+            # user_orders is already filtered to this platform, so just check event
+            same_event_platform_orders = user_orders[
+                user_orders['event'].apply(normalize_event_name) == normalized_target_event
             ]
             
-            if not same_event_venue_orders.empty:
+            if not same_event_platform_orders.empty:
                 # Check if any of these purchases were within the last 30 days
                 thirty_days_ago = today - timedelta(days=30)
-                recent_same_event_venue = same_event_venue_orders[
-                    pd.to_datetime(same_event_venue_orders['sold_date'], errors='coerce') >= thirty_days_ago
+                recent_same_event_platform = same_event_platform_orders[
+                    pd.to_datetime(same_event_platform_orders['sold_date'], errors='coerce') >= thirty_days_ago
                 ]
                 
-                if not recent_same_event_venue.empty:
+                if not recent_same_event_platform.empty:
                     is_available = False
-                    last_purchase_date = pd.to_datetime(recent_same_event_venue['sold_date'].iloc[0]).date()
-                    reasons.append(f"Already purchased '{event}' at '{theater}' within last 30 days (last purchase: {last_purchase_date})")
+                    last_purchase_date = pd.to_datetime(recent_same_event_platform['sold_date'].iloc[0]).date()
+                    venue_name = recent_same_event_platform['theater'].iloc[0] if 'theater' in recent_same_event_platform.columns else "unknown venue"
+                    reasons.append(f"Already purchased '{event}' at '{venue_name}' on {theater} within last 30 days (last purchase: {last_purchase_date})")
     
     except Exception as e:
         # If there's any error in rule checking, default to available
@@ -981,12 +983,12 @@ def main():
         The following rules are applied to determine account availability **per Venue Platform**:
         
         1. **3-Month Ticket Limit**: No more than 6 tickets purchased in the last 3 months (90 days) on this platform
-        2. **Event Ticket Limit**: No more than 4 tickets for the same event
-        3. **30-Day Venue Transaction Limit**: No more than one transaction for the same event at the same venue within 30 days
+        2. **Event Ticket Limit**: No more than 4 tickets for the same event on this platform
+        3. **30-Day Platform Transaction Limit**: No more than one transaction for the same event on this platform within 30 days
         
         An account is marked as **unavailable** if any of these rules would be violated.
         
-        ℹ️ *Note: Rule 1 is platform-specific. An account may have 6 tickets on ArTix and still be available for other platforms.*
+        ℹ️ *Note: **All rules are platform-specific.** An account's purchase history on one platform (e.g., ArTix) does not affect availability on another platform (e.g., Denver Center). Each platform is evaluated independently.*
         """)
         st.markdown("---")
         

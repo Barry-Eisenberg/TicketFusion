@@ -68,17 +68,17 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
     is_available = True
     
     try:
-        # Rule 1: No more than 6 tickets in the last 6 months
+        # Rule 1: No more than 6 tickets in the last 3 months
         if 'sold_date' in user_orders.columns and 'cnt' in user_orders.columns:
-            six_months_ago = today - timedelta(days=180)
+            three_months_ago = today - timedelta(days=90)
             recent_orders = user_orders[
-                pd.to_datetime(user_orders['sold_date'], errors='coerce') >= six_months_ago
+                pd.to_datetime(user_orders['sold_date'], errors='coerce') >= three_months_ago
             ]
-            total_tickets_6m = recent_orders['cnt'].sum()
+            total_tickets_3m = recent_orders['cnt'].sum()
             
-            if total_tickets_6m + cnt_new > 6:
+            if total_tickets_3m + cnt_new > 6:
                 is_available = False
-                reasons.append(f"Would exceed 6 tickets in 6 months (current: {total_tickets_6m}, requesting: {cnt_new})")
+                reasons.append(f"Would exceed 6 tickets in 3 months (current: {total_tickets_3m}, requesting: {cnt_new})")
         
         # Rule 2: No more than 4 tickets for the same event
         if event and 'event' in user_orders.columns and 'cnt' in user_orders.columns:
@@ -616,7 +616,7 @@ def main():
         st.markdown("""
         The following rules are applied to determine account availability:
         
-        1. **6-Month Ticket Limit**: No more than 6 tickets purchased in the last 6 months
+        1. **3-Month Ticket Limit**: No more than 6 tickets purchased in the last 3 months (90 days)
         2. **Event Ticket Limit**: No more than 4 tickets for the same event
         3. **30-Day Venue Transaction Limit**: No more than one transaction for the same event at the same venue within 30 days
         

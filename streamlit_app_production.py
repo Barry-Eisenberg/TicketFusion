@@ -512,10 +512,179 @@ def main():
             st.warning("No order data available for analytics")
             st.stop()
         
-        # Revenue Analysis - more flexible column detection
-        revenue_cols = [col for col in df.columns if any(word in col.lower() for word in ['revenue', 'income', 'sales', 'amount', 'total', 'price', 'cost'])]
+        # Prepare data - flexible column detection and mapping
+        revenue_cols = [col for col in df.columns if any(word in col.lower() for word in ['revenue', 'income', 'sales', 'amount', 'total', 'price']) and 'cost' not in col.lower()]
         cost_cols = [col for col in df.columns if any(word in col.lower() for word in ['cost', 'expense', 'fee', 'charge'])]
         
+        # Map common column names
+        column_mapping = {
+            'sold_date': ['Sold Date', 'sold_date', 'SoldDate', 'Date Sold', 'Purchase Date'],
+            'event_date': ['Event Date', 'event_date', 'EventDate', 'Event_Date'],
+            'event': ['Event', 'event', 'Event Name', 'EventName'],
+            'theater': ['Theater', 'theater', 'Theatre', 'Venue', 'venue'],
+            'cnt': ['CNT', 'cnt', 'Count', 'Tickets', 'Quantity', 'Qty']
+        }
+        
+        for new_col, possible_names in column_mapping.items():
+            for old_col in possible_names:
+                if old_col in df.columns and new_col not in df.columns:
+                    df = df.rename(columns={old_col: new_col})
+                    break
+        
+        # Clean and prepare data
+        if revenue_cols:
+            df = clean_currency_column(df, revenue_cols[0])
+        if cost_cols:
+            df = clean_currency_column(df, cost_cols[0])
+        if 'sold_date' in df.columns:
+            df['sold_date'] = pd.to_datetime(df['sold_date'], errors='coerce')
+        if 'event_date' in df.columns:
+            df['event_date'] = pd.to_datetime(df['event_date'], errors='coerce')
+        if 'cnt' in df.columns:
+            df['cnt'] = pd.to_numeric(df['cnt'], errors='coerce')
+        
+        # === KPI DASHBOARD ===
+        st.subheader("📊 Key Performance Indicators")
+        
+        kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+        
+        with kpi_col1:
+            # Total tickets sold
+            if 'cnt' in df.columns:
+                total_tickets = df['cnt'].sum()
+                st.metric("🎫 Total Tickets Sold", f"{int(total_tickets):,}")
+            else:
+                st.metric("🎫 Total Tickets Sold", "N/A")
+        
+        with kpi_col2:
+            # Profit margin percentage
+            if revenue_cols and cost_cols:
+                total_revenue = df[revenue_cols[0]].sum()
+                total_cost = df[cost_cols[0]].sum()
+                if total_revenue > 0:
+                    profit_margin = ((total_revenue - total_cost) / total_revenue) * 100
+                    st.metric("💹 Profit Margin", f"{profit_margin:.1f}%")
+                else:
+                    st.metric("💹 Profit Margin", "N/A")
+            else:
+                st.metric("💹 Profit Margin", "N/A")
+        
+        with kpi_col3:
+            # Most popular event
+            if 'event' in df.columns and 'cnt' in df.columns:
+                event_popularity = df.groupby('event')['cnt'].sum().sort_values(ascending=False)
+                if not event_popularity.empty:
+                    top_event = event_popularity.index[0]
+                    top_event_tickets = int(event_popularity.iloc[0])
+                    st.metric("🌟 Most Popular Event", f"{top_event[:20]}..." if len(top_event) > 20 else top_event, f"{top_event_tickets} tickets")
+                else:
+                    st.metric("🌟 Most Popular Event", "N/A")
+            else:
+                st.metric("🌟 Most Popular Event", "N/A")
+        
+        with kpi_col4:
+            # Most active venue
+            if 'theater' in df.columns:
+                venue_activity = df.groupby('theater').size().sort_values(ascending=False)
+                if not venue_activity.empty:
+                    top_venue = venue_activity.index[0]
+                    top_venue_orders = int(venue_activity.iloc[0])
+                    st.metric("🎭 Most Active Venue", f"{top_venue[:20]}..." if len(top_venue) > 20 else top_venue, f"{top_venue_orders} orders")
+                else:
+                    st.metric("🎭 Most Active Venue", "N/A")
+            else:
+                st.metric("🎭 Most Active Venue", "N/A")
+        
+        st.markdown("---")
+        
+        # === TIME-BASED INSIGHTS ===
+        st.subheader("📅 Time-Based Insights")
+        
+        if 'sold_date' in df.columns and df['sold_date'].notna().any():
+            df_time = df[df['sold_date'].notna()].copy()
+            
+            time_col1, time_col2 = st.columns(2)
+            
+            with time_col1:
+                # Sales velocity (tickets per day)
+                if 'cnt' in df.columns:
+                    date_range = (df_time['sold_date'].max() - df_time['sold_date'].min()).days
+                    if date_range > 0:
+                        total_tickets = df_time['cnt'].sum()
+                        tickets_per_day = total_tickets / date_range
+                        st.metric("📈 Sales Velocity", f"{tickets_per_day:.1f} tickets/day")
+                    else:
+                        st.metric("📈 Sales Velocity", "N/A")
+                
+                # Best performing day of the week
+                if 'cnt' in df.columns:
+                    df_time['day_of_week'] = df_time['sold_date'].dt.day_name()
+                    day_performance = df_time.groupby('day_of_week')['cnt'].sum()
+                    if not day_performance.empty:
+                        best_day = day_performance.idxmax()
+                        best_day_tickets = int(day_performance.max())
+                        st.metric("📆 Best Sales Day", best_day, f"{best_day_tickets} tickets")
+                    else:
+                        st.metric("📆 Best Sales Day", "N/A")
+            
+            with time_col2:
+                # Average lead time (days between purchase and event)
+                if 'event_date' in df.columns and df_time['event_date'].notna().any():
+                    df_lead = df_time[df_time['event_date'].notna()].copy()
+                    df_lead['lead_time'] = (df_lead['event_date'] - df_lead['sold_date']).dt.days
+                    avg_lead_time = df_lead['lead_time'].mean()
+                    if not pd.isna(avg_lead_time):
+                        st.metric("⏰ Avg Lead Time", f"{int(avg_lead_time)} days", "Purchase to Event")
+                    else:
+                        st.metric("⏰ Avg Lead Time", "N/A")
+                else:
+                    st.metric("⏰ Avg Lead Time", "N/A")
+                
+                # Monthly trend indicator
+                df_time['year_month'] = df_time['sold_date'].dt.to_period('M')
+                monthly_sales = df_time.groupby('year_month').size()
+                if len(monthly_sales) >= 2:
+                    current_month = monthly_sales.iloc[-1]
+                    previous_month = monthly_sales.iloc[-2]
+                    month_change = ((current_month - previous_month) / previous_month) * 100 if previous_month > 0 else 0
+                    st.metric("📊 Monthly Trend", f"{current_month} orders", f"{month_change:+.1f}% vs prev month")
+                else:
+                    st.metric("📊 Monthly Trend", "N/A")
+            
+            # Weekly/Monthly trends chart
+            st.markdown("##### 📈 Sales Trends")
+            trend_cols = st.columns(2)
+            
+            with trend_cols[0]:
+                # Weekly trend
+                if 'cnt' in df.columns:
+                    df_time['week'] = df_time['sold_date'].dt.to_period('W')
+                    weekly_data = df_time.groupby('week')['cnt'].sum().reset_index()
+                    weekly_data['week'] = weekly_data['week'].astype(str)
+                    
+                    fig_weekly = px.bar(weekly_data, x='week', y='cnt',
+                                       title='Weekly Ticket Sales',
+                                       labels={'week': 'Week', 'cnt': 'Tickets Sold'})
+                    fig_weekly.update_traces(marker_color='#1f77b4')
+                    st.plotly_chart(fig_weekly, use_container_width=True)
+            
+            with trend_cols[1]:
+                # Day of week performance
+                if 'cnt' in df.columns:
+                    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                    day_sales = df_time.groupby('day_of_week')['cnt'].sum().reindex(day_order).reset_index()
+                    
+                    fig_day = px.bar(day_sales, x='day_of_week', y='cnt',
+                                    title='Sales by Day of Week',
+                                    labels={'day_of_week': 'Day', 'cnt': 'Tickets Sold'})
+                    fig_day.update_traces(marker_color='#2ca02c')
+                    st.plotly_chart(fig_day, use_container_width=True)
+        else:
+            st.info("No date information available for time-based analysis")
+        
+        st.markdown("---")
+        
+        # === FINANCIAL ANALYSIS (existing) ===
         if revenue_cols or cost_cols:
             st.subheader("💰 Financial Analysis")
             

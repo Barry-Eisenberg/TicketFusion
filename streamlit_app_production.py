@@ -563,8 +563,16 @@ def main():
     elif app_choice == "Analytics":
         st.header("📈 Analytics Dashboard")
         
+        # Auto-load data if we have a production sheet ID but no sheets_data
+        if not sheets_data and 'production_sheet_id' in st.session_state:
+            with st.spinner("Loading production data for analytics..."):
+                sheets_data = load_google_sheets_data(st.session_state['production_sheet_id'])
+                if sheets_data:
+                    st.session_state['sheets_data'] = sheets_data
+        
         if not sheets_data:
             st.error("No data available for analytics")
+            st.write("Please upload XLSX data using the sidebar options.")
             st.stop()
         
         # Automatically use Orders data for analytics
@@ -677,6 +685,13 @@ def main():
         st.header("🎫 Account Availability Checker")
         st.write("Check ticket availability for specific events using the three availability rules")
         
+        # Auto-load data if we have a production sheet ID but no sheets_data
+        if not sheets_data and 'production_sheet_id' in st.session_state:
+            with st.spinner("Loading production data for availability checker..."):
+                sheets_data = load_google_sheets_data(st.session_state['production_sheet_id'])
+                if sheets_data:
+                    st.session_state['sheets_data'] = sheets_data
+        
         # Load theater-to-platform mapping from CSV file FIRST
         THEATER_PLATFORM_MAPPING = {}
         try:
@@ -714,19 +729,31 @@ def main():
                 for i, col in enumerate(orders_df.columns):
                     st.write(f"{i+1}. '{col}'")
             
-            # Column mapping for Orders data (Row 4 headers, Column O=email, Column Q=theater)
+            # Column mapping for Orders data (Row 4 headers) - flexible matching
             column_mapping = {
-                'Sold Date': 'sold_date',
-                'Event Date': 'event_date', 
-                'Event': 'event',
-                'Theater': 'theater',
-                'Email': 'email',
-                'CNT': 'cnt'
+                'sold_date': ['Sold Date', 'sold_date', 'SoldDate', 'Date Sold'],
+                'event_date': ['Event Date', 'event_date', 'EventDate', 'Event_Date'], 
+                'event': ['Event', 'event', 'Event Name', 'EventName'],
+                'theater': ['Theater', 'theater', 'Theatre', 'Venue', 'venue'],
+                'email': ['Email', 'email', 'Customer Email', 'User Email', 'customer_email'],
+                'cnt': ['CNT', 'cnt', 'Count', 'Tickets', 'Quantity', 'Qty']
             }
             
-            for old_col, new_col in column_mapping.items():
-                if old_col in orders_df.columns:
-                    orders_df = orders_df.rename(columns={old_col: new_col})
+            # Apply flexible column mapping
+            for new_col, possible_names in column_mapping.items():
+                for old_col in possible_names:
+                    if old_col in orders_df.columns:
+                        orders_df = orders_df.rename(columns={old_col: new_col})
+                        break
+            
+            # Verify required columns exist
+            required_cols = ['theater', 'event', 'email']
+            missing_cols = [col for col in required_cols if col not in orders_df.columns]
+            
+            if missing_cols:
+                st.sidebar.error(f"❌ Missing required columns: {missing_cols}")
+                st.sidebar.write("Available columns:", list(orders_df.columns))
+                st.stop()
             
             # Convert date columns
             try:

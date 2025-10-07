@@ -423,46 +423,9 @@ def main():
                             st.session_state['sheets_data'] = sheets_data
                 else:
                     st.error("❌ Upload failed. Please try again.")
-                            
-            elif upload_option == "Upload XLSX & Create New Google Sheet (May Hit Quota)":
-                # Create new sheet method (may hit quota)
-                if st.sidebar.button("🔄 Create Google Sheet Copy", type="primary"):
-                    with st.spinner("Creating Google Sheet..."):
-                        sheet_id, sheet_url, sheet_name = create_google_sheet_from_xlsx(uploaded_file)
-                    
-                    if sheet_id:
-                        st.success("✅ Google Sheet created successfully!")
-                        
-                        # Store the sheet ID in session state for use
-                        st.session_state['production_sheet_id'] = sheet_id
-                        st.session_state['production_sheet_url'] = sheet_url
-                        
-                        # Auto-load the new sheet
-                        with st.spinner("Loading data..."):
-                            sheets_data = load_google_sheets_data(sheet_id)
-                    else:
-                        st.error("❌ Failed to create Google Sheet")
-            
-            # If we have a production sheet ID stored, offer to load it
-            if 'production_sheet_id' in st.session_state:
-                st.sidebar.markdown("---")
-                
-                if st.sidebar.button("📊 Load Production Data"):
-                    with st.spinner("Loading production data..."):
-                        sheets_data = load_google_sheets_data(st.session_state['production_sheet_id'])
-                
-                # Option to view the sheet
-                if st.sidebar.button("👁️ View Sheet in Browser"):
-                    if 'production_sheet_url' in st.session_state:
-                        st.sidebar.markdown(f"[🔗 Open Google Sheet]({st.session_state['production_sheet_url']})")
-                    else:
-                        # Construct URL from sheet ID if URL not available
-                        sheet_id = st.session_state.get('production_sheet_id', '')
-                        if sheet_id:
-                            sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
-                            st.sidebar.markdown(f"[🔗 Open Google Sheet]({sheet_url})")
-                        else:
-                            st.sidebar.error("No sheet available to view")
+    # Auto-load last used production sheet if available
+    if uploaded_file is None and 'production_sheet_id' in st.session_state and 'sheets_data' in st.session_state:
+        sheets_data = st.session_state['sheets_data']
 
     # Sidebar navigation
     # --- PRODUCTION DATA ONLY: No radio buttons, no options ---

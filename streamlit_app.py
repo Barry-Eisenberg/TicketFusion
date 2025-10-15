@@ -297,40 +297,75 @@ def main():
         if revenue_cols or cost_cols:
             st.subheader("💰 Financial Analysis")
             
+            # Calculate totals outside columns for gross profit
+            total_revenue = 0
+            total_cost = 0
+            
+            if revenue_cols:
+                revenue_col = revenue_cols[0]
+                df = clean_currency_column(df, revenue_col)
+                if df[revenue_col].notna().any():
+                    total_revenue = df[revenue_col].sum()
+            
+            if cost_cols:
+                cost_col = cost_cols[0]
+                df = clean_currency_column(df, cost_col)
+                if df[cost_col].notna().any():
+                    total_cost = df[cost_col].sum()
+            
             col1, col2 = st.columns(2)
             
             # Revenue chart
-            if revenue_cols:
+            if revenue_cols and total_revenue > 0:
                 with col1:
                     st.write("**Revenue Analysis**")
-                    revenue_col = revenue_cols[0]
-                    
-                    # Clean currency data
-                    df = clean_currency_column(df, revenue_col)
-                    
-                    if df[revenue_col].notna().any():
-                        # Revenue stats
-                        total_revenue = df[revenue_col].sum()
-                        avg_revenue = df[revenue_col].mean()
-                        st.metric("Total Revenue", f"${total_revenue:,.2f}")
-                        st.metric("Average Revenue", f"${avg_revenue:,.2f}")
+                    avg_revenue = df[revenue_col].mean()
+                    st.metric("Total Revenue", f"${total_revenue:,.2f}")
+                    st.metric("Average Revenue", f"${avg_revenue:,.2f}")
             
             # Cost metrics
-            if cost_cols:
+            if cost_cols and total_cost > 0:
                 with col2:
                     st.write("**Cost Analysis**")
-                    cost_col = cost_cols[0]
-                    
-                    # Clean currency data
-                    df = clean_currency_column(df, cost_col)
-                    
-                    if df[cost_col].notna().any():
-                        # Cost stats
-                        total_cost = df[cost_col].sum()
-                        avg_cost = df[cost_col].mean()
-                        st.metric("Total Cost", f"${total_cost:,.2f}")
-                        st.metric("Average Cost", f"${avg_cost:,.2f}")
+                    avg_cost = df[cost_col].mean()
+                    st.metric("Total Cost", f"${total_cost:,.2f}")
+                    st.metric("Average Cost", f"${avg_cost:,.2f}")
             
+            # Gross Profit
+            if revenue_cols and cost_cols and (total_revenue > 0 or total_cost > 0):
+                gross_profit = total_revenue - total_cost
+                st.metric("Gross Profit", f"${gross_profit:,.2f}")
+            
+            # Receivables Outstanding
+            if revenue_cols:
+                st.subheader("💳 Receivables Outstanding")
+                ten_days_ago = datetime.now() - timedelta(days=10)
+                
+                if 'sold_date' in df.columns:
+                    outstanding_orders = df[df['sold_date'] >= ten_days_ago]
+                    total_outstanding_tickets = outstanding_orders['cnt'].sum() if 'cnt' in outstanding_orders.columns else 0
+                    total_outstanding_revenue = outstanding_orders[revenue_cols[0]].sum()
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Outstanding Tickets", f"{total_outstanding_tickets:,}")
+                    with col2:
+                        st.metric("Outstanding Revenue", f"${total_outstanding_revenue:,.2f}")
+                    
+                    # Chart
+                    if not outstanding_orders.empty:
+                        outstanding_orders_copy = outstanding_orders.copy()
+                        outstanding_orders_copy['date_only'] = outstanding_orders_copy['sold_date'].dt.date
+                        daily_outstanding = outstanding_orders_copy.groupby('date_only').agg({
+                            'cnt': 'sum',
+                            revenue_cols[0]: 'sum'
+                        }).reset_index()
+                        
+                        fig_outstanding = px.bar(daily_outstanding, x='date_only', y=['cnt', revenue_cols[0]],
+                                                 title='Receivables Outstanding Over Time',
+                                                 labels={'value': 'Amount', 'date_only': 'Date', 'cnt': 'Tickets', revenue_cols[0]: 'Revenue'})
+                        st.plotly_chart(fig_outstanding, use_container_width=True)
+        
             # Time-based charts section
             st.subheader("📅 Trends Over Time")
             
@@ -659,7 +694,29 @@ def main():
                 if available_count > 0:
                     st.subheader("✅ Available Accounts")
                     available_df = results_df[results_df["available"] == True]
-                    st.dataframe(available_df[["email", "event", "platform", "event_date", "tickets"]], use_container_width=True)
+                    
+                    # Add ticket purchase history columns
+                    if not available_df.empty and orders_df is not None:
+                        three_months_ago = datetime.now() - timedelta(days=90)
+                        
+                        available_df['total_tickets_theater'] = available_df.apply(
+                            lambda row: orders_df[
+                                (orders_df['email'].str.lower() == row['email'].lower()) &
+                                (orders_df['theater'] == row['platform'])
+                            ]['cnt'].sum() if 'cnt' in orders_df.columns else 0,
+                            axis=1
+                        )
+                        
+                        available_df['total_tickets_past_3m'] = available_df.apply(
+                            lambda row: orders_df[
+                                (orders_df['email'].str.lower() == row['email'].lower()) &
+                                (orders_df['theater'] == row['platform']) &
+                                (orders_df['sold_date'] >= three_months_ago)
+                            ]['cnt'].sum() if 'cnt' in orders_df.columns and 'sold_date' in orders_df.columns else 0,
+                            axis=1
+                        )
+                    
+                    st.dataframe(available_df[["email", "event", "platform", "event_date", "tickets", "total_tickets_theater", "total_tickets_past_3m"]], use_container_width=True)
                 
                 if unavailable_count > 0:
                     st.subheader("❌ Unavailable Accounts")

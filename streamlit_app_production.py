@@ -27,22 +27,19 @@ def load_xlsx_from_google_drive(file_id=None):
     Download XLSX file from Google Drive and load all sheets into a dictionary of DataFrames
     """
     try:
-        # Get file_id from secrets if not provided
-        if file_id is None:
-            try:
-                file_id = st.secrets["PRODUCTION_DRIVE_FILE_ID"]
-            except Exception:
-                with open("STREAMLIT_SECRETS_READY.toml", "r") as f:
-                    secrets = toml.load(f)
-                    file_id = secrets["PRODUCTION_DRIVE_FILE_ID"]
+        # Get file_id from secrets
+        try:
+            file_id = st.secrets["PRODUCTION_DRIVE_FILE_ID"]
+        except KeyError:
+            st.error("PRODUCTION_DRIVE_FILE_ID secret is not set. Please configure it in your Streamlit Cloud app settings under Secrets.")
+            return None
         
         # Get credentials
         try:
             credentials_dict = dict(st.secrets["google_service_account"])
-        except Exception:
-            with open("STREAMLIT_SECRETS_READY.toml", "r") as f:
-                secrets = toml.load(f)
-                credentials_dict = dict(secrets["google_service_account"])
+        except KeyError:
+            st.error("google_service_account secret is not set. Please configure it in your Streamlit Cloud app settings under Secrets.")
+            return None
         
         # Define required scopes (including Drive API)
         scopes = [

@@ -974,8 +974,8 @@ def main():
             st.subheader("💳 Receivables Outstanding")
             ten_days_ago = datetime.now() - timedelta(days=10)
             
-            if 'sold_date' in df.columns:
-                outstanding_orders = df[df['sold_date'] >= ten_days_ago]
+            if 'event_date' in df.columns:
+                outstanding_orders = df[df['event_date'] >= ten_days_ago]
                 total_outstanding_tickets = outstanding_orders['cnt'].sum() if 'cnt' in outstanding_orders.columns else 0
                 total_outstanding_revenue = outstanding_orders[revenue_cols[0]].sum()
                 
@@ -988,7 +988,7 @@ def main():
                 # Chart
                 if not outstanding_orders.empty:
                     outstanding_orders_copy = outstanding_orders.copy()
-                    outstanding_orders_copy['date_only'] = outstanding_orders_copy['sold_date'].dt.date
+                    outstanding_orders_copy['date_only'] = outstanding_orders_copy['event_date'].dt.date
                     daily_outstanding = outstanding_orders_copy.groupby('date_only').agg({
                         'cnt': 'sum',
                         revenue_cols[0]: 'sum'
@@ -1343,6 +1343,35 @@ def main():
             # Results
             if results:
                 results_df = pd.DataFrame(results)
+                
+                # Add ticket history columns
+                if orders_df is not None and not results_df.empty:
+                    three_months_ago = datetime.now() - timedelta(days=90)
+                    
+                    def get_total_tickets_theater(row):
+                        platform_theaters = [t for t, p in THEATER_PLATFORM_MAPPING.items() if p == row['platform']]
+                        if not platform_theaters:
+                            return 0
+                        user_orders = orders_df[
+                            (orders_df['email'].str.lower() == row['email'].lower()) &
+                            (orders_df['theater'].isin(platform_theaters))
+                        ]
+                        return user_orders['cnt'].sum() if 'cnt' in user_orders.columns else 0
+                    
+                    def get_total_tickets_past_3m(row):
+                        platform_theaters = [t for t, p in THEATER_PLATFORM_MAPPING.items() if p == row['platform']]
+                        if not platform_theaters:
+                            return 0
+                        user_orders = orders_df[
+                            (orders_df['email'].str.lower() == row['email'].lower()) &
+                            (orders_df['theater'].isin(platform_theaters)) &
+                            (orders_df['sold_date'] >= three_months_ago)
+                        ]
+                        return user_orders['cnt'].sum() if 'cnt' in user_orders.columns and 'sold_date' in user_orders.columns else 0
+                    
+                    results_df['total_tickets_theater'] = results_df.apply(get_total_tickets_theater, axis=1)
+                    results_df['total_tickets_past_3m'] = results_df.apply(get_total_tickets_past_3m, axis=1)
+                
                 available_count = sum(1 for r in results if r["available"])
                 unavailable_count = len(results) - available_count
                 
@@ -1359,34 +1388,12 @@ def main():
                 if available_count > 0:
                     st.subheader("✅ Available Accounts")
                     available_df = results_df[results_df["available"] == True]
-                    
-                    # Add ticket purchase history columns
-                    if not available_df.empty and orders_df is not None:
-                        three_months_ago = datetime.now() - timedelta(days=90)
-                        
-                        available_df['total_tickets_theater'] = available_df.apply(
-                            lambda row: orders_df[
-                                (orders_df['email'].str.lower() == row['email'].lower()) &
-                                (orders_df['theater'] == row['platform'])
-                            ]['cnt'].sum() if 'cnt' in orders_df.columns else 0,
-                            axis=1
-                        )
-                        
-                        available_df['total_tickets_past_3m'] = available_df.apply(
-                            lambda row: orders_df[
-                                (orders_df['email'].str.lower() == row['email'].lower()) &
-                                (orders_df['theater'] == row['platform']) &
-                                (orders_df['sold_date'] >= three_months_ago)
-                            ]['cnt'].sum() if 'cnt' in orders_df.columns and 'sold_date' in orders_df.columns else 0,
-                            axis=1
-                        )
-                    
                     st.dataframe(available_df[["email", "event", "platform", "event_date", "tickets", "total_tickets_theater", "total_tickets_past_3m"]], use_container_width=True)
                 
                 if unavailable_count > 0:
                     st.subheader("❌ Unavailable Accounts")
                     unavailable_df = results_df[results_df["available"] == False]
-                    st.dataframe(unavailable_df[["email", "reasons", "event", "platform"]], use_container_width=True)
+                    st.dataframe(unavailable_df[["email", "reasons", "event", "platform", "total_tickets_theater", "total_tickets_past_3m"]], use_container_width=True)
                 
                 # Download button
                 csv = results_df.to_csv(index=False)

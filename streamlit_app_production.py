@@ -579,7 +579,7 @@ def main():
     data_source = st.sidebar.radio(
         "Choose data source:",
         ["Production Data (Google Drive)", "Production Data (XLSX Upload)", "Test Data (Google Sheets)"],
-        index=2  # Default to Test Data (Google Sheets)
+        index=0  # Default to Production Data from Google Drive
     )
     
     sheets_data = None

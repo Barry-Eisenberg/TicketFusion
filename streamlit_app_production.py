@@ -575,7 +575,7 @@ def main():
     st.sidebar.header("📊 Data Source")
     data_source = st.sidebar.radio(
         "Choose data source:",
-        ["Production Data (Google Drive)", "Production Data (XLSX Upload)", "Test Data (Google Sheets)"],
+        ["Production Data (Google Drive)"],
         index=0  # Default to Production Data from Google Drive
     )
     
@@ -597,51 +597,7 @@ def main():
                 st.session_state['sheets_data'] = sheets_data
                 st.sidebar.success(f"✅ Loaded {len(sheets_data)} sheets from Drive")
             else:
-                st.sidebar.error("❌ Failed to load from Google Drive. Check file sharing permissions.")
-                
-    elif data_source == "Test Data (Google Sheets)":
-        # Load from existing test Google Sheets
-        with st.spinner("Loading test data from Google Sheets..."):
-            sheets_data = load_google_sheets_data()
-    else:  # Production Data (XLSX Upload)
-        st.sidebar.subheader("📤 Production Data Options")
-        # Store template sheet ID for use
-        template_sheet_id = "1HcNCioqz8azE51WMF-XAux6byVKfuU_vgqUCbTLVt34"
-        
-        uploaded_file = st.sidebar.file_uploader(
-            "Choose XLSX file",
-            type=['xlsx'],
-            help="Upload your production data XLSX file to replace template sheet data"
-        )
-        if uploaded_file is not None:
-            if st.sidebar.button("📋 Upload to Template Sheet", type="primary"):
-                with st.spinner("Uploading data to template sheet..."):
-                    success = upload_xlsx_to_template_sheet(uploaded_file, template_sheet_id)
-                    if success:
-                        st.success("✅ Data uploaded successfully!")
-                        st.session_state['production_sheet_id'] = template_sheet_id
-                        # Auto-load the template sheet
-                        with st.spinner("Loading data..."):
-                            sheets_data = load_google_sheets_data(template_sheet_id)
-                            if sheets_data:
-                                st.session_state['sheets_data'] = sheets_data
-                    else:
-                        st.error("❌ Upload failed. Please try again.")
-        # Option to view the sheet if available
-        if 'production_sheet_id' in st.session_state:
-            if st.sidebar.button("👁️ View Sheet in Browser"):
-                if 'production_sheet_url' in st.session_state:
-                    st.sidebar.markdown(f"[🔗 Open Google Sheet]({st.session_state['production_sheet_url']})")
-                else:
-                    # Construct URL from sheet ID if URL not available
-                    sheet_id = st.session_state.get('production_sheet_id', '')
-                    if sheet_id:
-                        sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
-                        st.sidebar.markdown(f"[🔗 Open Google Sheet]({sheet_url})")
-                    else:
-                        st.sidebar.error("No sheet available to view")
-    
-    # Main Navigation Tabs
+                st.sidebar.error("❌ Failed to load from Google Drive. Check file sharing permissions.")    # Main Navigation Tabs
     tab1, tab2, tab3 = st.tabs(["🏠 Home", "📈 Analytics", "🎫 Account Availability Checker"])
     
     with tab1:
@@ -656,15 +612,6 @@ def main():
                 st.success(f"✅ Production data loaded successfully from Google Drive")
             else:
                 st.warning("⚠️ No production data loaded. Check Google Drive connection and file sharing.")
-        elif data_source == "Production Data (XLSX Upload)":
-            st.info("🏭 **Production Mode**: Upload XLSX files to create Google Sheet copies for analysis")
-            
-            if 'production_sheet_id' in st.session_state:
-                st.success(f"✅ Production sheet loaded: {st.session_state['production_sheet_id']}")
-            else:
-                st.warning("⚠️ No production data loaded. Upload an XLSX file to get started.")
-        else:
-            st.info("🧪 **Test Mode**: Using test Google Sheets data")
         
         # Quick Summary
         if sheets_data:
@@ -787,6 +734,237 @@ def main():
         
         st.markdown("---")
         
+        # === FINANCIAL ANALYSIS ===
+        if revenue_cols or cost_cols:
+            st.subheader("💰 Financial Analysis")
+            
+            col1, col2 = st.columns(2)
+            
+            # Revenue chart
+            if revenue_cols:
+                with col1:
+                    st.write("**Revenue Analysis**")
+                    revenue_col = revenue_cols[0]
+                    
+                    # Clean currency data
+                    df = clean_currency_column(df, revenue_col)
+                    
+                    if df[revenue_col].notna().any():
+                        # Revenue stats
+                        total_revenue = df[revenue_col].sum()
+                        avg_revenue = df[revenue_col].mean()
+                        st.metric("Total Revenue", f"${total_revenue:,.2f}")
+                        st.metric("Average Revenue", f"${avg_revenue:,.2f}")
+            
+            # Cost metrics
+            if cost_cols:
+                with col2:
+                    st.write("**Cost Analysis**")
+                    cost_col = cost_cols[0]
+                    
+                    # Clean currency data
+                    df = clean_currency_column(df, cost_col)
+                    
+                    if df[cost_col].notna().any():
+                        # Cost stats
+                        total_cost = df[cost_col].sum()
+                        avg_cost = df[cost_col].mean()
+                        st.metric("Total Cost", f"${total_cost:,.2f}")
+                        st.metric("Average Cost", f"${avg_cost:,.2f}")
+            
+            # Additional Financial Metrics
+            st.markdown("##### 📊 Additional Financial Metrics")
+            fin_cols = st.columns(3)
+            
+            with fin_cols[0]:
+                # Gross Profit Margin
+                if revenue_cols and cost_cols and df[revenue_cols[0]].notna().any() and df[cost_cols[0]].notna().any():
+                    total_revenue = df[revenue_cols[0]].sum()
+                    total_cost = df[cost_cols[0]].sum()
+                    if total_revenue > 0:
+                        gross_margin = ((total_revenue - total_cost) / total_revenue) * 100
+                        st.metric("💰 Gross Profit Margin", f"{gross_margin:.1f}%")
+                    else:
+                        st.metric("💰 Gross Profit Margin", "N/A")
+                else:
+                    st.metric("💰 Gross Profit Margin", "N/A")
+            
+            with fin_cols[1]:
+                # Average Profit per Ticket
+                if revenue_cols and cost_cols and 'cnt' in df.columns:
+                    total_revenue = df[revenue_cols[0]].sum()
+                    total_cost = df[cost_cols[0]].sum()
+                    total_tickets = df['cnt'].sum()
+                    if total_tickets > 0:
+                        profit_per_ticket = (total_revenue - total_cost) / total_tickets
+                        st.metric("🎫 Avg Profit/Ticket", f"${profit_per_ticket:.2f}")
+                    else:
+                        st.metric("🎫 Avg Profit/Ticket", "N/A")
+                else:
+                    st.metric("🎫 Avg Profit/Ticket", "N/A")
+            
+            with fin_cols[2]:
+                # Revenue per Ticket
+                if revenue_cols and 'cnt' in df.columns:
+                    total_revenue = df[revenue_cols[0]].sum()
+                    total_tickets = df['cnt'].sum()
+                    if total_tickets > 0:
+                        revenue_per_ticket = total_revenue / total_tickets
+                        st.metric("💵 Revenue/Ticket", f"${revenue_per_ticket:.2f}")
+                    else:
+                        st.metric("💵 Revenue/Ticket", "N/A")
+                else:
+                    st.metric("💵 Revenue/Ticket", "N/A")
+            
+            # Time-based charts section
+            st.subheader("📅 Trends Over Time")
+            
+            # Check for date columns for time-based analysis
+            date_cols = [col for col in df.columns if any(word in col.lower() for word in ['date', 'time', 'sold', 'event'])]
+            
+            if date_cols and (revenue_cols or cost_cols):
+                # Use the first available date column
+                date_col = date_cols[0]
+                
+                # Convert to datetime
+                try:
+                    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                    df_time = df.dropna(subset=[date_col]).copy()
+                    
+                    if not df_time.empty:
+                        # Group by date and sum values
+                        df_time['date_only'] = df_time[date_col].dt.date
+                        
+                        if revenue_cols and cost_cols:
+                            daily_data = df_time.groupby('date_only').agg({
+                                revenue_cols[0]: 'sum',
+                                cost_cols[0]: 'sum'
+                            }).reset_index()
+                            daily_data['profit'] = daily_data[revenue_cols[0]] - daily_data[cost_cols[0]]
+                        elif revenue_cols:
+                            daily_data = df_time.groupby('date_only').agg({revenue_cols[0]: 'sum'}).reset_index()
+                        
+                        chart_cols = st.columns(2)
+                        
+                        # Revenue over time
+                        if revenue_cols:
+                            with chart_cols[0]:
+                                fig_revenue_time = px.line(daily_data, x='date_only', y=revenue_cols[0],
+                                                         title='Revenue Over Time',
+                                                         labels={'date_only': 'Date', revenue_cols[0]: 'Revenue ($)'})
+                                fig_revenue_time.update_traces(line_color='#1f77b4')
+                                st.plotly_chart(fig_revenue_time, use_container_width=True)
+                        
+                        # Profit over time (if both revenue and cost exist)
+                        if revenue_cols and cost_cols:
+                            with chart_cols[1]:
+                                fig_profit_time = px.line(daily_data, x='date_only', y='profit',
+                                                        title='Profit Over Time',
+                                                        labels={'date_only': 'Date', 'profit': 'Profit ($)'})
+                                fig_profit_time.update_traces(line_color='#2ca02c')
+                                st.plotly_chart(fig_profit_time, use_container_width=True)
+                                
+                except Exception as e:
+                    st.warning(f"Could not create time-based charts: {e}")
+        else:
+            st.info("No revenue or cost columns found in the selected sheet.")
+            st.write("Available columns:", list(df.columns))
+        
+        st.markdown("---")
+        
+        # === RECEIVABLES OUTSTANDING ===
+        if revenue_cols:
+            st.subheader("💳 Receivables Outstanding")
+            ten_days_ago = datetime.now() - timedelta(days=10)
+            
+            if 'event_date' in df.columns:
+                outstanding_orders = df[df['event_date'] >= ten_days_ago]
+                total_outstanding_tickets = outstanding_orders['cnt'].sum() if 'cnt' in outstanding_orders.columns else 0
+                total_outstanding_revenue = outstanding_orders[revenue_cols[0]].sum()
+                
+                # Calculate Outstanding Costs and Profit if cost data exists
+                if cost_cols:
+                    total_outstanding_costs = outstanding_orders[cost_cols[0]].sum()
+                    total_outstanding_profit = total_outstanding_revenue - total_outstanding_costs
+                else:
+                    total_outstanding_costs = 0
+                    total_outstanding_profit = 0
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Outstanding Tickets", f"{total_outstanding_tickets:,}")
+                with col2:
+                    st.metric("Outstanding Revenue", f"${total_outstanding_revenue:,.2f}")
+                with col3:
+                    if cost_cols:
+                        st.metric("Outstanding Costs", f"${total_outstanding_costs:,.2f}")
+                    else:
+                        st.metric("Outstanding Costs", "N/A")
+                with col4:
+                    if cost_cols:
+                        st.metric("Outstanding Profit", f"${total_outstanding_profit:,.2f}")
+                    else:
+                        st.metric("Outstanding Profit", "N/A")
+                
+                # Additional Receivables Metrics
+                st.markdown("##### 📊 Receivables Analysis")
+                rec_cols = st.columns(3)
+                
+                with rec_cols[0]:
+                    # Days Sales Outstanding (DSO) - simplified version
+                    if 'sold_date' in df.columns and revenue_cols:
+                        # Calculate average collection period
+                        total_revenue_all = df[revenue_cols[0]].sum()
+                        if total_revenue_all > 0:
+                            # Simplified DSO: (Outstanding Receivables / Total Revenue) * 365
+                            dso = (total_outstanding_revenue / total_revenue_all) * 365
+                            st.metric("📅 Days Sales Outstanding", f"{dso:.1f} days")
+                        else:
+                            st.metric("📅 Days Sales Outstanding", "N/A")
+                    else:
+                        st.metric("📅 Days Sales Outstanding", "N/A")
+                
+                with rec_cols[1]:
+                    # Receivables Turnover
+                    if 'sold_date' in df.columns and revenue_cols:
+                        # Annual revenue estimate (simplified)
+                        date_range = (df['sold_date'].max() - df['sold_date'].min()).days
+                        if date_range > 0:
+                            annual_revenue = (total_revenue_all / date_range) * 365
+                            if total_outstanding_revenue > 0:
+                                turnover = annual_revenue / total_outstanding_revenue
+                                st.metric("🔄 Receivables Turnover", f"{turnover:.2f}x")
+                            else:
+                                st.metric("🔄 Receivables Turnover", "N/A")
+                        else:
+                            st.metric("🔄 Receivables Turnover", "N/A")
+                    else:
+                        st.metric("🔄 Receivables Turnover", "N/A")
+                
+                with rec_cols[2]:
+                    # Working Capital (simplified - outstanding revenue minus outstanding costs)
+                    if cost_cols:
+                        working_capital = total_outstanding_revenue - total_outstanding_costs
+                        st.metric("💼 Working Capital", f"${working_capital:,.2f}")
+                    else:
+                        st.metric("💼 Working Capital", "N/A")
+                
+                # Chart
+                if not outstanding_orders.empty:
+                    outstanding_orders_copy = outstanding_orders.copy()
+                    outstanding_orders_copy['date_only'] = outstanding_orders_copy['event_date'].dt.date
+                    daily_outstanding = outstanding_orders_copy.groupby('date_only').agg({
+                        'cnt': 'sum',
+                        revenue_cols[0]: 'sum'
+                    }).reset_index()
+                    
+                    fig_outstanding = px.bar(daily_outstanding, x='date_only', y=['cnt', revenue_cols[0]],
+                                             title='Receivables Outstanding Over Time',
+                                             labels={'value': 'Amount', 'date_only': 'Date', 'cnt': 'Tickets', revenue_cols[0]: 'Revenue'})
+                    st.plotly_chart(fig_outstanding, use_container_width=True)
+        
+        st.markdown("---")
+        
         # === TIME-BASED INSIGHTS ===
         st.subheader("📅 Time-Based Insights")
         
@@ -871,130 +1049,6 @@ def main():
                     st.plotly_chart(fig_day, use_container_width=True)
         else:
             st.info("No date information available for time-based analysis")
-        
-        st.markdown("---")
-        
-        # === FINANCIAL ANALYSIS (existing) ===
-        if revenue_cols or cost_cols:
-            st.subheader("💰 Financial Analysis")
-            
-            col1, col2 = st.columns(2)
-            
-            # Revenue chart
-            if revenue_cols:
-                with col1:
-                    st.write("**Revenue Analysis**")
-                    revenue_col = revenue_cols[0]
-                    
-                    # Clean currency data
-                    df = clean_currency_column(df, revenue_col)
-                    
-                    if df[revenue_col].notna().any():
-                        # Revenue stats
-                        total_revenue = df[revenue_col].sum()
-                        avg_revenue = df[revenue_col].mean()
-                        st.metric("Total Revenue", f"${total_revenue:,.2f}")
-                        st.metric("Average Revenue", f"${avg_revenue:,.2f}")
-            
-            # Cost metrics
-            if cost_cols:
-                with col2:
-                    st.write("**Cost Analysis**")
-                    cost_col = cost_cols[0]
-                    
-                    # Clean currency data
-                    df = clean_currency_column(df, cost_col)
-                    
-                    if df[cost_col].notna().any():
-                        # Cost stats
-                        total_cost = df[cost_col].sum()
-                        avg_cost = df[cost_col].mean()
-                        st.metric("Total Cost", f"${total_cost:,.2f}")
-                        st.metric("Average Cost", f"${avg_cost:,.2f}")
-            
-            # Time-based charts section
-            st.subheader("📅 Trends Over Time")
-            
-            # Check for date columns for time-based analysis
-            date_cols = [col for col in df.columns if any(word in col.lower() for word in ['date', 'time', 'sold', 'event'])]
-            
-            if date_cols and (revenue_cols or cost_cols):
-                # Use the first available date column
-                date_col = date_cols[0]
-                
-                # Convert to datetime
-                try:
-                    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-                    df_time = df.dropna(subset=[date_col]).copy()
-                    
-                    if not df_time.empty:
-                        # Group by date and sum values
-                        df_time['date_only'] = df_time[date_col].dt.date
-                        
-                        if revenue_cols and cost_cols:
-                            daily_data = df_time.groupby('date_only').agg({
-                                revenue_cols[0]: 'sum',
-                                cost_cols[0]: 'sum'
-                            }).reset_index()
-                            daily_data['profit'] = daily_data[revenue_cols[0]] - daily_data[cost_cols[0]]
-                        elif revenue_cols:
-                            daily_data = df_time.groupby('date_only').agg({revenue_cols[0]: 'sum'}).reset_index()
-                        
-                        chart_cols = st.columns(2)
-                        
-                        # Revenue over time
-                        if revenue_cols:
-                            with chart_cols[0]:
-                                fig_revenue_time = px.line(daily_data, x='date_only', y=revenue_cols[0],
-                                                         title='Revenue Over Time',
-                                                         labels={'date_only': 'Date', revenue_cols[0]: 'Revenue ($)'})
-                                fig_revenue_time.update_traces(line_color='#1f77b4')
-                                st.plotly_chart(fig_revenue_time, use_container_width=True)
-                        
-                        # Profit over time (if both revenue and cost exist)
-                        if revenue_cols and cost_cols:
-                            with chart_cols[1]:
-                                fig_profit_time = px.line(daily_data, x='date_only', y='profit',
-                                                        title='Profit Over Time',
-                                                        labels={'date_only': 'Date', 'profit': 'Profit ($)'})
-                                fig_profit_time.update_traces(line_color='#2ca02c')
-                                st.plotly_chart(fig_profit_time, use_container_width=True)
-                                
-                except Exception as e:
-                    st.warning(f"Could not create time-based charts: {e}")
-        else:
-            st.info("No revenue or cost columns found in the selected sheet.")
-            st.write("Available columns:", list(df.columns))
-        
-        # Receivables Outstanding
-        if revenue_cols:
-            st.subheader("💳 Receivables Outstanding")
-            ten_days_ago = datetime.now() - timedelta(days=10)
-            
-            if 'event_date' in df.columns:
-                outstanding_orders = df[df['event_date'] >= ten_days_ago]
-                total_outstanding_tickets = outstanding_orders['cnt'].sum() if 'cnt' in outstanding_orders.columns else 0
-                total_outstanding_revenue = outstanding_orders[revenue_cols[0]].sum()
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Outstanding Tickets", f"{total_outstanding_tickets:,}")
-                with col2:
-                    st.metric("Outstanding Revenue", f"${total_outstanding_revenue:,.2f}")
-                
-                # Chart
-                if not outstanding_orders.empty:
-                    outstanding_orders_copy = outstanding_orders.copy()
-                    outstanding_orders_copy['date_only'] = outstanding_orders_copy['event_date'].dt.date
-                    daily_outstanding = outstanding_orders_copy.groupby('date_only').agg({
-                        'cnt': 'sum',
-                        revenue_cols[0]: 'sum'
-                    }).reset_index()
-                    
-                    fig_outstanding = px.bar(daily_outstanding, x='date_only', y=['cnt', revenue_cols[0]],
-                                             title='Receivables Outstanding Over Time',
-                                             labels={'value': 'Amount', 'date_only': 'Date', 'cnt': 'Tickets', revenue_cols[0]: 'Revenue'})
-                    st.plotly_chart(fig_outstanding, use_container_width=True)
 
     with tab3:
         # ACCOUNT AVAILABILITY CHECKER TAB

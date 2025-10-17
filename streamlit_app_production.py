@@ -1449,7 +1449,7 @@ def main():
                 if available_count > 0:
                     st.subheader("✅ Available Accounts")
                     available_df = results_df[results_df["available"] == True]
-                    st.dataframe(available_df[["email", "event", "platform", "event_date", "tickets", "total_tickets_theater", "total_tickets_past_3m"]], use_container_width=True)
+                    st.dataframe(available_df[["email", "event", "platform", "event_date", "total_tickets_theater", "total_tickets_past_3m"]], use_container_width=True)
                 
                 if unavailable_count > 0:
                     st.subheader("❌ Unavailable Accounts")

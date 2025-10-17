@@ -302,6 +302,15 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
                     last_purchase_date = pd.to_datetime(recent_same_event_platform['sold_date'].iloc[0]).date()
                     venue_name = recent_same_event_platform['theater'].iloc[0] if 'theater' in recent_same_event_platform.columns else "unknown venue"
                     reasons.append(f"Already purchased '{event}' at '{venue_name}' on {theater} within last 30 days (last purchase: {last_purchase_date})")
+        
+        # Rule 4: No more than 10 total tickets purchased on the selected platform (regardless of time horizon)
+        if theater and 'cnt' in user_orders.columns:
+            total_tickets_platform = user_orders['cnt'].sum()
+            
+            if total_tickets_platform >= 10:
+                is_available = False
+                platform_text = f" on {theater}" if theater else ""
+                reasons.append(f"Already has 10 or more total tickets{platform_text} (current: {total_tickets_platform})")
     
     except Exception as e:
         # If there's any error in rule checking, default to available
@@ -1063,6 +1072,7 @@ def main():
         1. **3-Month Ticket Limit**: No more than 6 tickets purchased in the last 3 months (90 days) on this platform
         2. **Event Ticket Limit**: No more than 4 tickets for the same event on this platform
         3. **30-Day Platform Transaction Limit**: No more than one transaction for the same event on this platform within 30 days
+        4. **Platform Lifetime Limit**: No more than 10 total tickets purchased on this platform (regardless of time horizon)
         
         An account is marked as **unavailable** if any of these rules would be violated.
         """)

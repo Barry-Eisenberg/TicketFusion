@@ -725,6 +725,8 @@ def main():
     
     # Main Navigation Tabs (removed Home tab)
     tab1, tab2 = st.tabs(["📈 Analytics", "🎫 Account Availability Checker"])
+    
+    with tab1:
         # ANALYTICS TAB
         st.header("📈 Analytics Dashboard")
         

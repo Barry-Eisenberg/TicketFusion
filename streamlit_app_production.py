@@ -691,31 +691,20 @@ def main():
                 st.session_state['sheets_data'] = sheets_data
                 st.sidebar.success(f"✅ Loaded {len(sheets_data)} sheets from Drive")
             else:
-                st.sidebar.error("❌ Failed to load from Google Drive. Check file sharing permissions.")    # Main Navigation Tabs
-    tab1, tab2, tab3 = st.tabs(["🏠 Home", "📈 Analytics", "🎫 Account Availability Checker"])
-    
-    with tab1:
-        # HOME TAB
-        st.header("Welcome to TicketFusion - Production Version")
-        st.write("Your integrated ticketing and analytics platform with production data support.")
+                st.sidebar.error("❌ Failed to load from Google Drive. Check file sharing permissions.")
         
-        # Data source info
-        if data_source == "Production Data (Google Drive)":
-            st.info("☁️ **Production Mode**: Connected to live Google Drive XLSX file")
-            if sheets_data:
-                st.success(f"✅ Production data loaded successfully from Google Drive")
-            else:
-                st.warning("⚠️ No production data loaded. Check Google Drive connection and file sharing.")
-        
-        # Quick Summary
+        # Data Ingestion Metrics in Sidebar
         if sheets_data:
-            col1, col2, col3, col4 = st.columns(4)
+            st.sidebar.markdown("---")
+            st.sidebar.subheader("📊 Data Summary")
             
+            col1, col2 = st.sidebar.columns(2)
             with col1:
-                st.metric("📊 Total Sheets", len(sheets_data))
+                st.metric("� Total Records", f"{sum(len(df) for df in sheets_data.values()):,}")
             with col2:
-                total_rows = sum(len(df) for df in sheets_data.values())
-                st.metric("📋 Total Records", f"{total_rows:,}")
+                st.metric("📄 Sheets", len(sheets_data))
+            
+            col3, col4 = st.sidebar.columns(2)
             with col3:
                 if 'Orders' in sheets_data:
                     st.metric("🛒 Orders", len(sheets_data['Orders']))
@@ -726,10 +715,16 @@ def main():
                     st.metric("👥 Accounts", len(sheets_data['Accounts']))
                 else:
                     st.metric("👥 Accounts", "N/A")
-            
-            st.markdown("---")
-
-    with tab2:
+        
+        # Show data source status
+        if data_source == "Production Data (Google Drive)":
+            if sheets_data:
+                st.sidebar.info("☁️ **Production Mode**: Connected to live Google Drive XLSX file")
+            else:
+                st.sidebar.warning("⚠️ No production data loaded. Check Google Drive connection.")
+    
+    # Main Navigation Tabs (removed Home tab)
+    tab1, tab2 = st.tabs(["📈 Analytics", "🎫 Account Availability Checker"])
         # ANALYTICS TAB
         st.header("📈 Analytics Dashboard")
         
@@ -1144,7 +1139,7 @@ def main():
         else:
             st.info("No date information available for time-based analysis")
 
-    with tab3:
+    with tab2:
         # ACCOUNT AVAILABILITY CHECKER TAB
         st.header("🎫 Account Availability Checker")
         st.write("Check ticket availability for specific events using the availability rules below")

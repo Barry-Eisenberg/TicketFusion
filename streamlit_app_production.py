@@ -192,6 +192,81 @@ def get_unique_events(event_list):
     
     return sorted(unique_events)
 
+def generate_email_metrics_table(orders_df, selected_platform, theater_platform_mapping):
+    """
+    Generate a table showing email metrics for a selected venue platform.
+    
+    Args:
+        orders_df: DataFrame containing orders data
+        selected_platform: The selected venue platform name
+        theater_platform_mapping: Dictionary mapping theaters to venue platforms
+    
+    Returns:
+        DataFrame with columns: email, total_tickets_purchased, outstanding_tickets
+    """
+    if orders_df is None or selected_platform not in theater_platform_mapping.values():
+        return pd.DataFrame()
+    
+    # Get all theaters that belong to this platform
+    platform_theaters = [theater for theater, platform in theater_platform_mapping.items() 
+                        if platform == selected_platform]
+    
+    if not platform_theaters:
+        return pd.DataFrame()
+    
+    # Filter orders to only include this platform's theaters
+    platform_orders = orders_df[orders_df['theater'].astype(str).str.strip().isin(platform_theaters)].copy()
+    
+    if platform_orders.empty:
+        return pd.DataFrame()
+    
+    # Ensure we have the required columns
+    required_cols = ['email', 'cnt']
+    if not all(col in platform_orders.columns for col in required_cols):
+        return pd.DataFrame()
+    
+    # Convert cnt to numeric
+    platform_orders['cnt'] = pd.to_numeric(platform_orders['cnt'], errors='coerce').fillna(0)
+    
+    # Get today's date for filtering future events
+    today = pd.Timestamp.now().normalize()
+    
+    # Calculate metrics for each email
+    email_metrics = []
+    
+    # Get unique emails that have purchased tickets for this platform
+    unique_emails = platform_orders['email'].dropna().astype(str).str.strip().unique()
+    
+    for email in unique_emails:
+        if not email or email == '' or '@' not in email:
+            continue
+            
+        email = email.lower().strip()
+        user_orders = platform_orders[platform_orders['email'].str.lower().str.strip() == email]
+        
+        # Total cumulative tickets purchased
+        total_tickets_purchased = user_orders['cnt'].sum()
+        
+        # Outstanding tickets (for future events)
+        outstanding_tickets = 0
+        if 'event_date' in user_orders.columns:
+            user_orders['event_date'] = pd.to_datetime(user_orders['event_date'], errors='coerce')
+            future_orders = user_orders[user_orders['event_date'] >= today]
+            outstanding_tickets = future_orders['cnt'].sum()
+        
+        email_metrics.append({
+            'email': email,
+            'total_tickets_purchased': int(total_tickets_purchased),
+            'outstanding_tickets': int(outstanding_tickets)
+        })
+    
+    # Create DataFrame and sort alphabetically by email
+    metrics_df = pd.DataFrame(email_metrics)
+    if not metrics_df.empty:
+        metrics_df = metrics_df.sort_values('email').reset_index(drop=True)
+    
+    return metrics_df
+
 def check_email_availability(email, orders, today, event=None, theater=None, event_date=None, cnt_new=1, sold_date_new=None):
     """
     Check availability for an email based on platform-specific rules.
@@ -1355,6 +1430,35 @@ def main():
                     else:
                         emails = df[email_col].dropna().unique()
                         emails = [e for e in emails if str(e).strip() != "" and "@" in str(e) and "." in str(e)]
+        
+        # Display email metrics table for selected platform
+        if selected_platform and orders_df is not None:
+            st.subheader("📊 Email Purchase History & Outstanding Tickets")
+            st.write(f"Showing metrics for **{selected_platform}** platform")
+            
+            metrics_df = generate_email_metrics_table(orders_df, selected_platform, THEATER_PLATFORM_MAPPING)
+            
+            if not metrics_df.empty:
+                # Format the table for better display
+                display_df = metrics_df.copy()
+                display_df['email'] = display_df['email'].str.lower()  # Ensure consistent casing
+                
+                st.dataframe(
+                    display_df,
+                    column_config={
+                        "email": st.column_config.TextColumn("Email", width="medium"),
+                        "total_tickets_purchased": st.column_config.NumberColumn("Total Tickets Purchased", width="small"),
+                        "outstanding_tickets": st.column_config.NumberColumn("Outstanding Tickets (Future Events)", width="small")
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
+                
+                st.info(f"📧 {len(metrics_df)} unique email addresses with purchase history for {selected_platform}")
+            else:
+                st.info(f"ℹ️ No purchase history found for {selected_platform} platform")
+        
+        st.markdown("---")
         
         # Run check button
         run_check = st.button("🎯 Check Availability", type="primary")

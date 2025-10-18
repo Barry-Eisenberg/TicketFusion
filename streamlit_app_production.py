@@ -1433,22 +1433,28 @@ def main():
         
         # Display email metrics table for selected platform
         if selected_platform and orders_df is not None:
-            st.subheader("📊 Email Purchase History & Outstanding Tickets")
+            # Create columns for title and button
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.subheader("📊 Email Purchase History")
+            with col2:
+                run_check = st.button("🎯 Check Availability", type="primary", use_container_width=True)
+            
             st.write(f"Showing metrics for **{selected_platform}** platform")
             
             metrics_df = generate_email_metrics_table(orders_df, selected_platform, THEATER_PLATFORM_MAPPING)
             
             if not metrics_df.empty:
-                # Format the table for better display
-                display_df = metrics_df.copy()
+                # Sort by outstanding tickets descending by default
+                display_df = metrics_df.sort_values('outstanding_tickets', ascending=False).copy()
                 display_df['email'] = display_df['email'].str.lower()  # Ensure consistent casing
                 
                 st.dataframe(
                     display_df,
                     column_config={
                         "email": st.column_config.TextColumn("Email", width="medium"),
-                        "total_tickets_purchased": st.column_config.NumberColumn("Total Tickets Purchased", width="small"),
-                        "outstanding_tickets": st.column_config.NumberColumn("Outstanding Tickets (Future Events)", width="small")
+                        "outstanding_tickets": st.column_config.NumberColumn("Outstanding Tickets", width="small"),
+                        "total_tickets_purchased": st.column_config.NumberColumn("Total Tickets Purchased", width="small")
                     },
                     use_container_width=True,
                     hide_index=True
@@ -1460,8 +1466,9 @@ def main():
         
         st.markdown("---")
         
-        # Run check button
-        run_check = st.button("🎯 Check Availability", type="primary")
+        # Run check button (only show if not already shown above)
+        if not (selected_platform and orders_df is not None):
+            run_check = st.button("🎯 Check Availability", type="primary")
         
         # Collapsible theater mappings (for reference) - placed after button
         with st.expander("🗺️ View Theater → Platform Mappings", expanded=False):

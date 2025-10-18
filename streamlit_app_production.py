@@ -53,8 +53,18 @@ def load_xlsx_from_google_drive(file_id=None):
         # Build Drive API service
         drive_service = build('drive', 'v3', credentials=credentials)
         
-        # Download the file
-        request = drive_service.files().get_media(fileId=file_id)
+        # Check file type first
+        file_metadata = drive_service.files().get(fileId=file_id, fields='mimeType').execute()
+        mime_type = file_metadata.get('mimeType')
+        
+        # Handle different file types
+        if mime_type == 'application/vnd.google-apps.spreadsheet':
+            # This is a Google Sheets file - export as XLSX
+            request = drive_service.files().export_media(fileId=file_id, mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        else:
+            # This is a binary file (XLSX) - download directly
+            request = drive_service.files().get_media(fileId=file_id)
+        
         file_bytes = BytesIO()
         downloader = MediaIoBaseDownload(file_bytes, request)
         

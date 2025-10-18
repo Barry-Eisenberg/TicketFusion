@@ -29,9 +29,9 @@ def load_xlsx_from_google_drive(file_id=None):
     try:
         # Get file_id from secrets
         try:
-            file_id = st.secrets["PRODUCTION_DRIVE_FILE_ID"]
+            file_id = st.secrets["GOOGLE_SHEETS_DOC_ID"]
         except KeyError:
-            st.error("PRODUCTION_DRIVE_FILE_ID secret is not set. Please configure it in your Streamlit Cloud app settings under Secrets.")
+            st.error("GOOGLE_SHEETS_DOC_ID secret is not set. Please configure it in your Streamlit Cloud app settings under Secrets.")
             return None
         
         # Get credentials

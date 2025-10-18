@@ -27,22 +27,19 @@ def load_xlsx_from_google_drive(file_id=None):
     Download XLSX file from Google Drive and load all sheets into a dictionary of DataFrames
     """
     try:
-        # Get file_id from secrets if not provided
-        if file_id is None:
-            try:
-                file_id = st.secrets["PRODUCTION_DRIVE_FILE_ID"]
-            except Exception:
-                with open("STREAMLIT_SECRETS_READY.toml", "r") as f:
-                    secrets = toml.load(f)
-                    file_id = secrets["PRODUCTION_DRIVE_FILE_ID"]
+        # Get file_id from secrets
+        try:
+            file_id = st.secrets["GOOGLE_SHEETS_DOC_ID"]
+        except KeyError:
+            st.error("GOOGLE_SHEETS_DOC_ID secret is not set. Please configure it in your Streamlit Cloud app settings under Secrets.")
+            return None
         
         # Get credentials
         try:
             credentials_dict = dict(st.secrets["google_service_account"])
-        except Exception:
-            with open("STREAMLIT_SECRETS_READY.toml", "r") as f:
-                secrets = toml.load(f)
-                credentials_dict = dict(secrets["google_service_account"])
+        except KeyError:
+            st.error("google_service_account secret is not set. Please configure it in your Streamlit Cloud app settings under Secrets.")
+            return None
         
         # Define required scopes (including Drive API)
         scopes = [
@@ -56,8 +53,18 @@ def load_xlsx_from_google_drive(file_id=None):
         # Build Drive API service
         drive_service = build('drive', 'v3', credentials=credentials)
         
-        # Download the file
-        request = drive_service.files().get_media(fileId=file_id)
+        # Check file type first
+        file_metadata = drive_service.files().get(fileId=file_id, fields='mimeType').execute()
+        mime_type = file_metadata.get('mimeType')
+        
+        # Handle different file types
+        if mime_type == 'application/vnd.google-apps.spreadsheet':
+            # This is a Google Sheets file - export as XLSX
+            request = drive_service.files().export_media(fileId=file_id, mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        else:
+            # This is a binary file (XLSX) - download directly
+            request = drive_service.files().get_media(fileId=file_id)
+        
         file_bytes = BytesIO()
         downloader = MediaIoBaseDownload(file_bytes, request)
         
@@ -185,6 +192,81 @@ def get_unique_events(event_list):
     
     return sorted(unique_events)
 
+def generate_email_metrics_table(orders_df, selected_platform, theater_platform_mapping):
+    """
+    Generate a table showing email metrics for a selected venue platform.
+    
+    Args:
+        orders_df: DataFrame containing orders data
+        selected_platform: The selected venue platform name
+        theater_platform_mapping: Dictionary mapping theaters to venue platforms
+    
+    Returns:
+        DataFrame with columns: email, total_tickets_purchased, outstanding_tickets
+    """
+    if orders_df is None or selected_platform not in theater_platform_mapping.values():
+        return pd.DataFrame()
+    
+    # Get all theaters that belong to this platform
+    platform_theaters = [theater for theater, platform in theater_platform_mapping.items() 
+                        if platform == selected_platform]
+    
+    if not platform_theaters:
+        return pd.DataFrame()
+    
+    # Filter orders to only include this platform's theaters
+    platform_orders = orders_df[orders_df['theater'].astype(str).str.strip().isin(platform_theaters)].copy()
+    
+    if platform_orders.empty:
+        return pd.DataFrame()
+    
+    # Ensure we have the required columns
+    required_cols = ['email', 'cnt']
+    if not all(col in platform_orders.columns for col in required_cols):
+        return pd.DataFrame()
+    
+    # Convert cnt to numeric
+    platform_orders['cnt'] = pd.to_numeric(platform_orders['cnt'], errors='coerce').fillna(0)
+    
+    # Get today's date for filtering future events
+    today = pd.Timestamp.now().normalize()
+    
+    # Calculate metrics for each email
+    email_metrics = []
+    
+    # Get unique emails that have purchased tickets for this platform
+    unique_emails = platform_orders['email'].dropna().astype(str).str.strip().unique()
+    
+    for email in unique_emails:
+        if not email or email == '' or '@' not in email:
+            continue
+            
+        email = email.lower().strip()
+        user_orders = platform_orders[platform_orders['email'].str.lower().str.strip() == email]
+        
+        # Total cumulative tickets purchased
+        total_tickets_purchased = user_orders['cnt'].sum()
+        
+        # Outstanding tickets (for future events)
+        outstanding_tickets = 0
+        if 'event_date' in user_orders.columns:
+            user_orders['event_date'] = pd.to_datetime(user_orders['event_date'], errors='coerce')
+            future_orders = user_orders[user_orders['event_date'] >= today]
+            outstanding_tickets = future_orders['cnt'].sum()
+        
+        email_metrics.append({
+            'email': email,
+            'total_tickets_purchased': int(total_tickets_purchased),
+            'outstanding_tickets': int(outstanding_tickets)
+        })
+    
+    # Create DataFrame and sort alphabetically by email
+    metrics_df = pd.DataFrame(email_metrics)
+    if not metrics_df.empty:
+        metrics_df = metrics_df.sort_values('email').reset_index(drop=True)
+    
+    return metrics_df
+
 def check_email_availability(email, orders, today, event=None, theater=None, event_date=None, cnt_new=1, sold_date_new=None):
     """
     Check availability for an email based on platform-specific rules.
@@ -305,6 +387,15 @@ def check_email_availability(email, orders, today, event=None, theater=None, eve
                     last_purchase_date = pd.to_datetime(recent_same_event_platform['sold_date'].iloc[0]).date()
                     venue_name = recent_same_event_platform['theater'].iloc[0] if 'theater' in recent_same_event_platform.columns else "unknown venue"
                     reasons.append(f"Already purchased '{event}' at '{venue_name}' on {theater} within last 30 days (last purchase: {last_purchase_date})")
+        
+        # Rule 4: No more than 10 total tickets purchased on the selected platform (regardless of time horizon)
+        if theater and 'cnt' in user_orders.columns:
+            total_tickets_platform = user_orders['cnt'].sum()
+            
+            if total_tickets_platform >= 10:
+                is_available = False
+                platform_text = f" on {theater}" if theater else ""
+                reasons.append(f"Already has 10 or more total tickets{platform_text} (current: {total_tickets_platform})")
     
     except Exception as e:
         # If there's any error in rule checking, default to available
@@ -578,7 +669,7 @@ def main():
     st.sidebar.header("📊 Data Source")
     data_source = st.sidebar.radio(
         "Choose data source:",
-        ["Production Data (Google Drive)", "Production Data (XLSX Upload)", "Test Data (Google Sheets)"],
+        ["Production Data (Google Drive)"],
         index=0  # Default to Production Data from Google Drive
     )
     
@@ -600,51 +691,7 @@ def main():
                 st.session_state['sheets_data'] = sheets_data
                 st.sidebar.success(f"✅ Loaded {len(sheets_data)} sheets from Drive")
             else:
-                st.sidebar.error("❌ Failed to load from Google Drive. Check file sharing permissions.")
-                
-    elif data_source == "Test Data (Google Sheets)":
-        # Load from existing test Google Sheets
-        with st.spinner("Loading test data from Google Sheets..."):
-            sheets_data = load_google_sheets_data()
-    else:  # Production Data (XLSX Upload)
-        st.sidebar.subheader("📤 Production Data Options")
-        # Store template sheet ID for use
-        template_sheet_id = "1HcNCioqz8azE51WMF-XAux6byVKfuU_vgqUCbTLVt34"
-        
-        uploaded_file = st.sidebar.file_uploader(
-            "Choose XLSX file",
-            type=['xlsx'],
-            help="Upload your production data XLSX file to replace template sheet data"
-        )
-        if uploaded_file is not None:
-            if st.sidebar.button("📋 Upload to Template Sheet", type="primary"):
-                with st.spinner("Uploading data to template sheet..."):
-                    success = upload_xlsx_to_template_sheet(uploaded_file, template_sheet_id)
-                    if success:
-                        st.success("✅ Data uploaded successfully!")
-                        st.session_state['production_sheet_id'] = template_sheet_id
-                        # Auto-load the template sheet
-                        with st.spinner("Loading data..."):
-                            sheets_data = load_google_sheets_data(template_sheet_id)
-                            if sheets_data:
-                                st.session_state['sheets_data'] = sheets_data
-                    else:
-                        st.error("❌ Upload failed. Please try again.")
-        # Option to view the sheet if available
-        if 'production_sheet_id' in st.session_state:
-            if st.sidebar.button("👁️ View Sheet in Browser"):
-                if 'production_sheet_url' in st.session_state:
-                    st.sidebar.markdown(f"[🔗 Open Google Sheet]({st.session_state['production_sheet_url']})")
-                else:
-                    # Construct URL from sheet ID if URL not available
-                    sheet_id = st.session_state.get('production_sheet_id', '')
-                    if sheet_id:
-                        sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
-                        st.sidebar.markdown(f"[🔗 Open Google Sheet]({sheet_url})")
-                    else:
-                        st.sidebar.error("No sheet available to view")
-    
-    # Main Navigation Tabs
+                st.sidebar.error("❌ Failed to load from Google Drive. Check file sharing permissions.")    # Main Navigation Tabs
     tab1, tab2, tab3 = st.tabs(["🏠 Home", "📈 Analytics", "🎫 Account Availability Checker"])
     
     with tab1:
@@ -659,15 +706,6 @@ def main():
                 st.success(f"✅ Production data loaded successfully from Google Drive")
             else:
                 st.warning("⚠️ No production data loaded. Check Google Drive connection and file sharing.")
-        elif data_source == "Production Data (XLSX Upload)":
-            st.info("🏭 **Production Mode**: Upload XLSX files to create Google Sheet copies for analysis")
-            
-            if 'production_sheet_id' in st.session_state:
-                st.success(f"✅ Production sheet loaded: {st.session_state['production_sheet_id']}")
-            else:
-                st.warning("⚠️ No production data loaded. Upload an XLSX file to get started.")
-        else:
-            st.info("🧪 **Test Mode**: Using test Google Sheets data")
         
         # Quick Summary
         if sheets_data:
@@ -790,6 +828,237 @@ def main():
         
         st.markdown("---")
         
+        # === FINANCIAL ANALYSIS ===
+        if revenue_cols or cost_cols:
+            st.subheader("💰 Financial Analysis")
+            
+            col1, col2 = st.columns(2)
+            
+            # Revenue chart
+            if revenue_cols:
+                with col1:
+                    st.write("**Revenue Analysis**")
+                    revenue_col = revenue_cols[0]
+                    
+                    # Clean currency data
+                    df = clean_currency_column(df, revenue_col)
+                    
+                    if df[revenue_col].notna().any():
+                        # Revenue stats
+                        total_revenue = df[revenue_col].sum()
+                        avg_revenue = df[revenue_col].mean()
+                        st.metric("Total Revenue", f"${total_revenue:,.2f}")
+                        st.metric("Average Revenue", f"${avg_revenue:,.2f}")
+            
+            # Cost metrics
+            if cost_cols:
+                with col2:
+                    st.write("**Cost Analysis**")
+                    cost_col = cost_cols[0]
+                    
+                    # Clean currency data
+                    df = clean_currency_column(df, cost_col)
+                    
+                    if df[cost_col].notna().any():
+                        # Cost stats
+                        total_cost = df[cost_col].sum()
+                        avg_cost = df[cost_col].mean()
+                        st.metric("Total Cost", f"${total_cost:,.2f}")
+                        st.metric("Average Cost", f"${avg_cost:,.2f}")
+            
+            # Additional Financial Metrics
+            st.markdown("##### 📊 Additional Financial Metrics")
+            fin_cols = st.columns(3)
+            
+            with fin_cols[0]:
+                # Gross Profit Margin
+                if revenue_cols and cost_cols and df[revenue_cols[0]].notna().any() and df[cost_cols[0]].notna().any():
+                    total_revenue = df[revenue_cols[0]].sum()
+                    total_cost = df[cost_cols[0]].sum()
+                    if total_revenue > 0:
+                        gross_margin = ((total_revenue - total_cost) / total_revenue) * 100
+                        st.metric("💰 Gross Profit Margin", f"{gross_margin:.1f}%")
+                    else:
+                        st.metric("💰 Gross Profit Margin", "N/A")
+                else:
+                    st.metric("💰 Gross Profit Margin", "N/A")
+            
+            with fin_cols[1]:
+                # Average Profit per Ticket
+                if revenue_cols and cost_cols and 'cnt' in df.columns:
+                    total_revenue = df[revenue_cols[0]].sum()
+                    total_cost = df[cost_cols[0]].sum()
+                    total_tickets = df['cnt'].sum()
+                    if total_tickets > 0:
+                        profit_per_ticket = (total_revenue - total_cost) / total_tickets
+                        st.metric("🎫 Avg Profit/Ticket", f"${profit_per_ticket:.2f}")
+                    else:
+                        st.metric("🎫 Avg Profit/Ticket", "N/A")
+                else:
+                    st.metric("🎫 Avg Profit/Ticket", "N/A")
+            
+            with fin_cols[2]:
+                # Revenue per Ticket
+                if revenue_cols and 'cnt' in df.columns:
+                    total_revenue = df[revenue_cols[0]].sum()
+                    total_tickets = df['cnt'].sum()
+                    if total_tickets > 0:
+                        revenue_per_ticket = total_revenue / total_tickets
+                        st.metric("💵 Revenue/Ticket", f"${revenue_per_ticket:.2f}")
+                    else:
+                        st.metric("💵 Revenue/Ticket", "N/A")
+                else:
+                    st.metric("💵 Revenue/Ticket", "N/A")
+            
+            # Time-based charts section
+            st.subheader("📅 Trends Over Time")
+            
+            # Check for date columns for time-based analysis
+            date_cols = [col for col in df.columns if any(word in col.lower() for word in ['date', 'time', 'sold', 'event'])]
+            
+            if date_cols and (revenue_cols or cost_cols):
+                # Use the first available date column
+                date_col = date_cols[0]
+                
+                # Convert to datetime
+                try:
+                    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                    df_time = df.dropna(subset=[date_col]).copy()
+                    
+                    if not df_time.empty:
+                        # Group by date and sum values
+                        df_time['date_only'] = df_time[date_col].dt.date
+                        
+                        if revenue_cols and cost_cols:
+                            daily_data = df_time.groupby('date_only').agg({
+                                revenue_cols[0]: 'sum',
+                                cost_cols[0]: 'sum'
+                            }).reset_index()
+                            daily_data['profit'] = daily_data[revenue_cols[0]] - daily_data[cost_cols[0]]
+                        elif revenue_cols:
+                            daily_data = df_time.groupby('date_only').agg({revenue_cols[0]: 'sum'}).reset_index()
+                        
+                        chart_cols = st.columns(2)
+                        
+                        # Revenue over time
+                        if revenue_cols:
+                            with chart_cols[0]:
+                                fig_revenue_time = px.line(daily_data, x='date_only', y=revenue_cols[0],
+                                                         title='Revenue Over Time',
+                                                         labels={'date_only': 'Date', revenue_cols[0]: 'Revenue ($)'})
+                                fig_revenue_time.update_traces(line_color='#1f77b4')
+                                st.plotly_chart(fig_revenue_time, use_container_width=True)
+                        
+                        # Profit over time (if both revenue and cost exist)
+                        if revenue_cols and cost_cols:
+                            with chart_cols[1]:
+                                fig_profit_time = px.line(daily_data, x='date_only', y='profit',
+                                                        title='Profit Over Time',
+                                                        labels={'date_only': 'Date', 'profit': 'Profit ($)'})
+                                fig_profit_time.update_traces(line_color='#2ca02c')
+                                st.plotly_chart(fig_profit_time, use_container_width=True)
+                                
+                except Exception as e:
+                    st.warning(f"Could not create time-based charts: {e}")
+        else:
+            st.info("No revenue or cost columns found in the selected sheet.")
+            st.write("Available columns:", list(df.columns))
+        
+        st.markdown("---")
+        
+        # === RECEIVABLES OUTSTANDING ===
+        if revenue_cols:
+            st.subheader("💳 Receivables Outstanding")
+            ten_days_ago = datetime.now() - timedelta(days=10)
+            
+            if 'event_date' in df.columns:
+                outstanding_orders = df[df['event_date'] >= ten_days_ago]
+                total_outstanding_tickets = outstanding_orders['cnt'].sum() if 'cnt' in outstanding_orders.columns else 0
+                total_outstanding_revenue = outstanding_orders[revenue_cols[0]].sum()
+                
+                # Calculate Outstanding Costs and Profit if cost data exists
+                if cost_cols:
+                    total_outstanding_costs = outstanding_orders[cost_cols[0]].sum()
+                    total_outstanding_profit = total_outstanding_revenue - total_outstanding_costs
+                else:
+                    total_outstanding_costs = 0
+                    total_outstanding_profit = 0
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Outstanding Tickets", f"{total_outstanding_tickets:,}")
+                with col2:
+                    st.metric("Outstanding Revenue", f"${total_outstanding_revenue:,.2f}")
+                with col3:
+                    if cost_cols:
+                        st.metric("Outstanding Costs", f"${total_outstanding_costs:,.2f}")
+                    else:
+                        st.metric("Outstanding Costs", "N/A")
+                with col4:
+                    if cost_cols:
+                        st.metric("Outstanding Profit", f"${total_outstanding_profit:,.2f}")
+                    else:
+                        st.metric("Outstanding Profit", "N/A")
+                
+                # Additional Receivables Metrics
+                st.markdown("##### 📊 Receivables Analysis")
+                rec_cols = st.columns(3)
+                
+                with rec_cols[0]:
+                    # Days Sales Outstanding (DSO) - simplified version
+                    if 'sold_date' in df.columns and revenue_cols:
+                        # Calculate average collection period
+                        total_revenue_all = df[revenue_cols[0]].sum()
+                        if total_revenue_all > 0:
+                            # Simplified DSO: (Outstanding Receivables / Total Revenue) * 365
+                            dso = (total_outstanding_revenue / total_revenue_all) * 365
+                            st.metric("📅 Days Sales Outstanding", f"{dso:.1f} days")
+                        else:
+                            st.metric("📅 Days Sales Outstanding", "N/A")
+                    else:
+                        st.metric("📅 Days Sales Outstanding", "N/A")
+                
+                with rec_cols[1]:
+                    # Receivables Turnover
+                    if 'sold_date' in df.columns and revenue_cols:
+                        # Annual revenue estimate (simplified)
+                        date_range = (df['sold_date'].max() - df['sold_date'].min()).days
+                        if date_range > 0:
+                            annual_revenue = (total_revenue_all / date_range) * 365
+                            if total_outstanding_revenue > 0:
+                                turnover = annual_revenue / total_outstanding_revenue
+                                st.metric("🔄 Receivables Turnover", f"{turnover:.2f}x")
+                            else:
+                                st.metric("🔄 Receivables Turnover", "N/A")
+                        else:
+                            st.metric("🔄 Receivables Turnover", "N/A")
+                    else:
+                        st.metric("🔄 Receivables Turnover", "N/A")
+                
+                with rec_cols[2]:
+                    # Working Capital (simplified - outstanding revenue minus outstanding costs)
+                    if cost_cols:
+                        working_capital = total_outstanding_revenue - total_outstanding_costs
+                        st.metric("💼 Working Capital", f"${working_capital:,.2f}")
+                    else:
+                        st.metric("💼 Working Capital", "N/A")
+                
+                # Chart
+                if not outstanding_orders.empty:
+                    outstanding_orders_copy = outstanding_orders.copy()
+                    outstanding_orders_copy['date_only'] = outstanding_orders_copy['event_date'].dt.date
+                    daily_outstanding = outstanding_orders_copy.groupby('date_only').agg({
+                        'cnt': 'sum',
+                        revenue_cols[0]: 'sum'
+                    }).reset_index()
+                    
+                    fig_outstanding = px.bar(daily_outstanding, x='date_only', y=['cnt', revenue_cols[0]],
+                                             title='Receivables Outstanding Over Time',
+                                             labels={'value': 'Amount', 'date_only': 'Date', 'cnt': 'Tickets', revenue_cols[0]: 'Revenue'})
+                    st.plotly_chart(fig_outstanding, use_container_width=True)
+        
+        st.markdown("---")
+        
         # === TIME-BASED INSIGHTS ===
         st.subheader("📅 Time-Based Insights")
         
@@ -874,130 +1143,6 @@ def main():
                     st.plotly_chart(fig_day, use_container_width=True)
         else:
             st.info("No date information available for time-based analysis")
-        
-        st.markdown("---")
-        
-        # === FINANCIAL ANALYSIS (existing) ===
-        if revenue_cols or cost_cols:
-            st.subheader("💰 Financial Analysis")
-            
-            col1, col2 = st.columns(2)
-            
-            # Revenue chart
-            if revenue_cols:
-                with col1:
-                    st.write("**Revenue Analysis**")
-                    revenue_col = revenue_cols[0]
-                    
-                    # Clean currency data
-                    df = clean_currency_column(df, revenue_col)
-                    
-                    if df[revenue_col].notna().any():
-                        # Revenue stats
-                        total_revenue = df[revenue_col].sum()
-                        avg_revenue = df[revenue_col].mean()
-                        st.metric("Total Revenue", f"${total_revenue:,.2f}")
-                        st.metric("Average Revenue", f"${avg_revenue:,.2f}")
-            
-            # Cost metrics
-            if cost_cols:
-                with col2:
-                    st.write("**Cost Analysis**")
-                    cost_col = cost_cols[0]
-                    
-                    # Clean currency data
-                    df = clean_currency_column(df, cost_col)
-                    
-                    if df[cost_col].notna().any():
-                        # Cost stats
-                        total_cost = df[cost_col].sum()
-                        avg_cost = df[cost_col].mean()
-                        st.metric("Total Cost", f"${total_cost:,.2f}")
-                        st.metric("Average Cost", f"${avg_cost:,.2f}")
-            
-            # Time-based charts section
-            st.subheader("📅 Trends Over Time")
-            
-            # Check for date columns for time-based analysis
-            date_cols = [col for col in df.columns if any(word in col.lower() for word in ['date', 'time', 'sold', 'event'])]
-            
-            if date_cols and (revenue_cols or cost_cols):
-                # Use the first available date column
-                date_col = date_cols[0]
-                
-                # Convert to datetime
-                try:
-                    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-                    df_time = df.dropna(subset=[date_col]).copy()
-                    
-                    if not df_time.empty:
-                        # Group by date and sum values
-                        df_time['date_only'] = df_time[date_col].dt.date
-                        
-                        if revenue_cols and cost_cols:
-                            daily_data = df_time.groupby('date_only').agg({
-                                revenue_cols[0]: 'sum',
-                                cost_cols[0]: 'sum'
-                            }).reset_index()
-                            daily_data['profit'] = daily_data[revenue_cols[0]] - daily_data[cost_cols[0]]
-                        elif revenue_cols:
-                            daily_data = df_time.groupby('date_only').agg({revenue_cols[0]: 'sum'}).reset_index()
-                        
-                        chart_cols = st.columns(2)
-                        
-                        # Revenue over time
-                        if revenue_cols:
-                            with chart_cols[0]:
-                                fig_revenue_time = px.line(daily_data, x='date_only', y=revenue_cols[0],
-                                                         title='Revenue Over Time',
-                                                         labels={'date_only': 'Date', revenue_cols[0]: 'Revenue ($)'})
-                                fig_revenue_time.update_traces(line_color='#1f77b4')
-                                st.plotly_chart(fig_revenue_time, use_container_width=True)
-                        
-                        # Profit over time (if both revenue and cost exist)
-                        if revenue_cols and cost_cols:
-                            with chart_cols[1]:
-                                fig_profit_time = px.line(daily_data, x='date_only', y='profit',
-                                                        title='Profit Over Time',
-                                                        labels={'date_only': 'Date', 'profit': 'Profit ($)'})
-                                fig_profit_time.update_traces(line_color='#2ca02c')
-                                st.plotly_chart(fig_profit_time, use_container_width=True)
-                                
-                except Exception as e:
-                    st.warning(f"Could not create time-based charts: {e}")
-        else:
-            st.info("No revenue or cost columns found in the selected sheet.")
-            st.write("Available columns:", list(df.columns))
-        
-        # Receivables Outstanding
-        if revenue_cols:
-            st.subheader("💳 Receivables Outstanding")
-            ten_days_ago = datetime.now() - timedelta(days=10)
-            
-            if 'sold_date' in df.columns:
-                outstanding_orders = df[df['sold_date'] >= ten_days_ago]
-                total_outstanding_tickets = outstanding_orders['cnt'].sum() if 'cnt' in outstanding_orders.columns else 0
-                total_outstanding_revenue = outstanding_orders[revenue_cols[0]].sum()
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Outstanding Tickets", f"{total_outstanding_tickets:,}")
-                with col2:
-                    st.metric("Outstanding Revenue", f"${total_outstanding_revenue:,.2f}")
-                
-                # Chart
-                if not outstanding_orders.empty:
-                    outstanding_orders_copy = outstanding_orders.copy()
-                    outstanding_orders_copy['date_only'] = outstanding_orders_copy['sold_date'].dt.date
-                    daily_outstanding = outstanding_orders_copy.groupby('date_only').agg({
-                        'cnt': 'sum',
-                        revenue_cols[0]: 'sum'
-                    }).reset_index()
-                    
-                    fig_outstanding = px.bar(daily_outstanding, x='date_only', y=['cnt', revenue_cols[0]],
-                                             title='Receivables Outstanding Over Time',
-                                             labels={'value': 'Amount', 'date_only': 'Date', 'cnt': 'Tickets', revenue_cols[0]: 'Revenue'})
-                    st.plotly_chart(fig_outstanding, use_container_width=True)
 
     with tab3:
         # ACCOUNT AVAILABILITY CHECKER TAB
@@ -1012,6 +1157,7 @@ def main():
         1. **3-Month Ticket Limit**: No more than 6 tickets purchased in the last 3 months (90 days) on this platform
         2. **Event Ticket Limit**: No more than 4 tickets for the same event on this platform
         3. **30-Day Platform Transaction Limit**: No more than one transaction for the same event on this platform within 30 days
+        4. **Platform Lifetime Limit**: No more than 10 total tickets purchased on this platform (regardless of time horizon)
         
         An account is marked as **unavailable** if any of these rules would be violated.
         """)
@@ -1285,6 +1431,35 @@ def main():
                         emails = df[email_col].dropna().unique()
                         emails = [e for e in emails if str(e).strip() != "" and "@" in str(e) and "." in str(e)]
         
+        # Display email metrics table for selected platform
+        if selected_platform and orders_df is not None:
+            st.subheader("📊 Email Purchase History & Outstanding Tickets")
+            st.write(f"Showing metrics for **{selected_platform}** platform")
+            
+            metrics_df = generate_email_metrics_table(orders_df, selected_platform, THEATER_PLATFORM_MAPPING)
+            
+            if not metrics_df.empty:
+                # Format the table for better display
+                display_df = metrics_df.copy()
+                display_df['email'] = display_df['email'].str.lower()  # Ensure consistent casing
+                
+                st.dataframe(
+                    display_df,
+                    column_config={
+                        "email": st.column_config.TextColumn("Email", width="medium"),
+                        "total_tickets_purchased": st.column_config.NumberColumn("Total Tickets Purchased", width="small"),
+                        "outstanding_tickets": st.column_config.NumberColumn("Outstanding Tickets (Future Events)", width="small")
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
+                
+                st.info(f"📧 {len(metrics_df)} unique email addresses with purchase history for {selected_platform}")
+            else:
+                st.info(f"ℹ️ No purchase history found for {selected_platform} platform")
+        
+        st.markdown("---")
+        
         # Run check button
         run_check = st.button("🎯 Check Availability", type="primary")
         
@@ -1343,6 +1518,35 @@ def main():
             # Results
             if results:
                 results_df = pd.DataFrame(results)
+                
+                # Add ticket history columns
+                if orders_df is not None and not results_df.empty:
+                    three_months_ago = datetime.now() - timedelta(days=90)
+                    
+                    def get_total_tickets_theater(row):
+                        platform_theaters = [t for t, p in THEATER_PLATFORM_MAPPING.items() if p == row['platform']]
+                        if not platform_theaters:
+                            return 0
+                        user_orders = orders_df[
+                            (orders_df['email'].str.lower() == row['email'].lower()) &
+                            (orders_df['theater'].isin(platform_theaters))
+                        ]
+                        return user_orders['cnt'].sum() if 'cnt' in user_orders.columns else 0
+                    
+                    def get_total_tickets_past_3m(row):
+                        platform_theaters = [t for t, p in THEATER_PLATFORM_MAPPING.items() if p == row['platform']]
+                        if not platform_theaters:
+                            return 0
+                        user_orders = orders_df[
+                            (orders_df['email'].str.lower() == row['email'].lower()) &
+                            (orders_df['theater'].isin(platform_theaters)) &
+                            (orders_df['sold_date'] >= three_months_ago)
+                        ]
+                        return user_orders['cnt'].sum() if 'cnt' in user_orders.columns and 'sold_date' in user_orders.columns else 0
+                    
+                    results_df['total_tickets_theater'] = results_df.apply(get_total_tickets_theater, axis=1)
+                    results_df['total_tickets_past_3m'] = results_df.apply(get_total_tickets_past_3m, axis=1)
+                
                 available_count = sum(1 for r in results if r["available"])
                 unavailable_count = len(results) - available_count
                 
@@ -1359,34 +1563,12 @@ def main():
                 if available_count > 0:
                     st.subheader("✅ Available Accounts")
                     available_df = results_df[results_df["available"] == True]
-                    
-                    # Add ticket purchase history columns
-                    if not available_df.empty and orders_df is not None:
-                        three_months_ago = datetime.now() - timedelta(days=90)
-                        
-                        available_df['total_tickets_theater'] = available_df.apply(
-                            lambda row: orders_df[
-                                (orders_df['email'].str.lower() == row['email'].lower()) &
-                                (orders_df['theater'] == row['platform'])
-                            ]['cnt'].sum() if 'cnt' in orders_df.columns else 0,
-                            axis=1
-                        )
-                        
-                        available_df['total_tickets_past_3m'] = available_df.apply(
-                            lambda row: orders_df[
-                                (orders_df['email'].str.lower() == row['email'].lower()) &
-                                (orders_df['theater'] == row['platform']) &
-                                (orders_df['sold_date'] >= three_months_ago)
-                            ]['cnt'].sum() if 'cnt' in orders_df.columns and 'sold_date' in orders_df.columns else 0,
-                            axis=1
-                        )
-                    
-                    st.dataframe(available_df[["email", "event", "platform", "event_date", "tickets", "total_tickets_theater", "total_tickets_past_3m"]], use_container_width=True)
+                    st.dataframe(available_df[["email", "event", "platform", "event_date", "total_tickets_theater", "total_tickets_past_3m"]], use_container_width=True)
                 
                 if unavailable_count > 0:
                     st.subheader("❌ Unavailable Accounts")
                     unavailable_df = results_df[results_df["available"] == False]
-                    st.dataframe(unavailable_df[["email", "reasons", "event", "platform"]], use_container_width=True)
+                    st.dataframe(unavailable_df[["email", "reasons", "event", "platform", "total_tickets_theater", "total_tickets_past_3m"]], use_container_width=True)
                 
                 # Download button
                 csv = results_df.to_csv(index=False)

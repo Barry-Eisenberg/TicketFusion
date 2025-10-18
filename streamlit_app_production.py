@@ -14,9 +14,6 @@ from io import BytesIO
 import openpyxl
 from tempfile import NamedTemporaryFile
 
-# QuickBooks integration
-from quickbooks_integration import init_quickbooks_integration, show_quickbooks_auth_ui, get_quickbooks_financial_data
-
 # Configure the page
 st.set_page_config(
     page_title="TicketFusion Dashboard - Production", 
@@ -609,12 +606,7 @@ def main():
                 st.session_state['sheets_data'] = sheets_data
                 st.sidebar.success(f"✅ Loaded {len(sheets_data)} sheets from Drive")
             else:
-                st.sidebar.error("❌ Failed to load from Google Drive. Check file sharing permissions.")
-    
-    # QuickBooks Integration
-    show_quickbooks_auth_ui()
-    
-    # Main Navigation Tabs
+                st.sidebar.error("❌ Failed to load from Google Drive. Check file sharing permissions.")    # Main Navigation Tabs
     tab1, tab2, tab3 = st.tabs(["🏠 Home", "📈 Analytics", "🎫 Account Availability Checker"])
     
     with tab1:
@@ -1066,105 +1058,6 @@ def main():
                     st.plotly_chart(fig_day, use_container_width=True)
         else:
             st.info("No date information available for time-based analysis")
-        
-        st.markdown("---")
-        
-        # === QUICKBOOKS FINANCIAL DATA ===
-        st.subheader("💰 QuickBooks Financial Data")
-        
-        qb_data = get_quickbooks_financial_data()
-        
-        if qb_data:
-            cash_flow = qb_data['cash_flow']
-            recent_txns = qb_data['recent_transactions']
-            
-            # Financial Overview Metrics
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                balance = cash_flow.get('total_balance', 0)
-                st.metric("🏦 Current Balance", f"${balance:,.2f}")
-            
-            with col2:
-                inflows = cash_flow.get('total_inflows', 0)
-                st.metric("📈 Cash Inflows (30d)", f"${inflows:,.2f}")
-            
-            with col3:
-                outflows = cash_flow.get('total_outflows', 0)
-                st.metric("📉 Cash Outflows (30d)", f"${outflows:,.2f}")
-            
-            with col4:
-                net_flow = cash_flow.get('net_cash_flow', 0)
-                st.metric("⚖️ Net Cash Flow (30d)", f"${net_flow:,.2f}", 
-                         delta=f"{net_flow:.0f}" if net_flow != 0 else None)
-            
-            # Cash Flow Analysis
-            st.markdown("##### 📊 Cash Flow Analysis")
-            cf_cols = st.columns(2)
-            
-            with cf_cols[0]:
-                accounts_count = cash_flow.get('cash_accounts_count', 0)
-                st.info(f"📊 Tracking {accounts_count} cash/bank accounts")
-                
-                period_days = cash_flow.get('period_days', 30)
-                st.info(f"📅 Analysis period: Last {period_days} days")
-            
-            with cf_cols[1]:
-                # Cash flow ratio
-                if inflows > 0:
-                    flow_ratio = outflows / inflows
-                    st.metric("💵 Outflow/Inflow Ratio", f"{flow_ratio:.2f}")
-                else:
-                    st.metric("💵 Outflow/Inflow Ratio", "N/A")
-            
-            # Recent Transactions
-            if recent_txns:
-                st.markdown("##### 🏦 Recent Transactions")
-                
-                # Convert to DataFrame for display
-                txn_df = pd.DataFrame(recent_txns)
-                if not txn_df.empty:
-                    # Format the data
-                    display_cols = ['TxnDate', 'TxnType', 'Amount', 'AccountName']
-                    available_cols = [col for col in display_cols if col in txn_df.columns]
-                    
-                    if available_cols:
-                        display_df = txn_df[available_cols].copy()
-                        
-                        # Format amount as currency
-                        if 'Amount' in display_df.columns:
-                            display_df['Amount'] = display_df['Amount'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
-                        
-                        # Format date
-                        if 'TxnDate' in display_df.columns:
-                            display_df['TxnDate'] = pd.to_datetime(display_df['TxnDate'], errors='coerce').dt.strftime('%Y-%m-%d')
-                        
-                        # Rename columns for better display
-                        column_names = {
-                            'TxnDate': 'Date',
-                            'TxnType': 'Type',
-                            'AccountName': 'Account'
-                        }
-                        display_df = display_df.rename(columns=column_names)
-                        
-                        st.dataframe(display_df.head(10), use_container_width=True)
-                        
-                        if len(recent_txns) > 10:
-                            st.info(f"Showing 10 of {len(recent_txns)} recent transactions")
-                    else:
-                        st.info("Transaction data available but missing expected columns")
-                else:
-                    st.info("No recent transactions found")
-            else:
-                st.info("No recent transaction data available")
-        else:
-            st.info("💡 Connect to QuickBooks to view real-time financial data")
-            st.markdown("""
-            **To enable QuickBooks integration:**
-            1. Add QuickBooks API credentials to your Streamlit secrets
-            2. Authorize the connection in the sidebar
-            3. View real-time cash flow, balance, and transaction data
-            """)
 
     with tab3:
         # ACCOUNT AVAILABILITY CHECKER TAB
